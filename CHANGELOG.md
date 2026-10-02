@@ -20,6 +20,10 @@ attribution and the full porting notes.
   `scripts/run-linux.sh`, `scripts/package-linux.sh`; Linux CI.
 - Verified live on ARM64 + GB10/CUDA 13: CUDA song generation, Parakeet
   karaoke, HT-Demucs stems, llama.cpp assistant write.
+- Assistant score edits are validated against the native two-voice dialect
+  before applying (a headerless reharmonization used to silently replace a
+  good score and kill its preview and Listen; now a readable error with the
+  old score kept).
 
 ## 2026-10-01 — 3.4.0
 

@@ -317,6 +317,13 @@ pub fn parse_draft(content: &str, required: &[&str]) -> Result<AssistDraft> {
         if !score.contains("K:") || !score.contains('|') {
             bail!("the assistant returned a score that is not ABC notation");
         }
+        // The engraver and the engine read the same native two-voice
+        // dialect: refuse an edit that is text but not music, instead of
+        // silently replacing a good score with one whose preview and Listen
+        // vanish. The old score stays, and the message says what broke.
+        if let Err(problem) = crate::score::abc::parse(score) {
+            bail!("the assistant returned a score that does not parse as music: {problem}");
+        }
     }
     Ok(AssistDraft {
         lyrics: field("lyrics"),
@@ -879,7 +886,17 @@ mod tests {
     #[test]
     fn a_score_answer_must_be_abc() {
         assert!(parse_draft("{\"abc\": \"just some words about music\"}", &["abc"]).is_err());
-        let draft = parse_draft("{\"abc\": \"X:1\\nK:C\\nc4|\"}", &["abc"]).unwrap();
+        // A fragment the old leniency accepted is refused now, with the
+        // parser's reason: applying it replaced a good score with one whose
+        // preview and Listen vanished.
+        let fragment = parse_draft("{\"abc\": \"X:1\\nK:C\\nc4|\"}", &["abc"]).unwrap_err();
+        assert!(fragment.to_string().contains("does not parse as music"), "{fragment}");
+    }
+
+    #[test]
+    fn a_native_two_voice_score_answer_applies() {
+        let score = "X:1\nT:\nM:4/4\nL:1/32\nQ:1/4=90\nV: Vocal clef=treble name=\"Vocal Melody\" snm=\"Vocal\"\nV: Ins clef=treble name=\"Ins Melody\" snm=\"Inst.\"\nK:G\n% verse\nV: Vocal\n\"G\"g8f8e8d8|B32|\nV: Ins\nZ2|\n";
+        let draft = parse_draft(&serde_json::json!({ "abc": score }).to_string(), &["abc"]).unwrap();
         assert!(draft.abc.unwrap().starts_with("X:1"));
     }
 
