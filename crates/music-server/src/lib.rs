@@ -1022,8 +1022,14 @@ pub async fn serve() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(address).await?;
     println!("music-server listening on http://{address}");
     if !address.ip().is_loopback() {
-        if remote::network_open() {
-            println!("access from the network is on: open http://<this-machine>:{} with the access key (Settings, or GET /v1/network on loopback)", address.port());
+        if let Some(key) = remote::access_key() {
+            // First access from another computer: the key lives in Settings
+            // and in the loopback status, but the operator setting this up
+            // over SSH reads the log, so it is printed once here.
+            println!(
+                "first access from another computer: http://<this-machine>:{}?key={key} (shown once at startup; afterwards in Settings or GET /v1/network on loopback)",
+                address.port()
+            );
         } else {
             eprintln!("[WARN] bound to {address} but access from the network is off, so other computers get 403. From this computer: PUT /v1/network {{\"enabled\": true}}, then GET /v1/network for the key.");
         }

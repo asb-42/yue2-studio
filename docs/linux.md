@@ -42,6 +42,12 @@ cookie afterwards); API clients send `Authorization: Bearer <key>`. Without
 the key the LAN gets 403 with instructions. To turn it off again:
 `PUT /v1/network {"enabled": false}` (loopback only).
 
+First access without touching the terminal twice: when the service starts
+bound off-loopback with access already on, it prints the full
+`http://<this-machine>:8791?key=…` URL once to its log; enabling access via
+the API logs it too. Afterwards the key lives in Settings and in
+`GET /v1/network` on loopback only — it is never shown to the network.
+
 System packages: `build-essential cmake pkg-config git curl python3 node 20+`.
 `ninja` is used when present (no sudo? bootstrap it: see below).
 Optional: CUDA toolkit 12 or 13 (`nvcc`), Vulkan SDK + `glslc`.

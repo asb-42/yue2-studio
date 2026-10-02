@@ -125,6 +125,15 @@ pub async fn change(
         if change.new_key || (access.enabled && access.key.is_empty()) {
             access.key = new_key();
         }
+        // The operator enabling this over SSH reads the log, not Settings:
+        // print the first-access URL once, at the moment it starts working.
+        if access.enabled && !access.key.is_empty() && (change.enabled == Some(true) || change.new_key) {
+            eprintln!(
+                "access from the network is on: first access at http://<this-machine>:{}?key={} (afterwards the key lives in Settings and GET /v1/network on loopback)",
+                crate::listen_port(),
+                access.key
+            );
+        }
     }
     crate::persist_studio_settings(&state).await.map_err(|error| crate::api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{error:#}")))?;
     Ok(status(ConnectInfo(peer), headers).await)
@@ -133,8 +142,14 @@ pub async fn change(
 /// Whether browsers off this computer get in: network access enabled with a
 /// key. Binding the LAN without this still answers them 403 (see `guard`).
 pub fn network_open() -> bool {
+    access_key().is_some()
+}
+
+/// The access key for off-machine browsers, if network access is on. Shown
+/// to the operator (server log, loopback status) but never to the network.
+pub fn access_key() -> Option<String> {
     let access = current();
-    access.enabled && !access.key.is_empty()
+    (access.enabled && !access.key.is_empty()).then(|| access.key.clone())
 }
 
 /// The key a request carries: `?key=`, the cookie, or a bearer token.
