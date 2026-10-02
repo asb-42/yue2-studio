@@ -38,6 +38,7 @@ mod sizes;
 pub mod net;
 mod saving;
 mod skins;
+mod tls;
 pub use saving::{set_save_dialog, SaveDialog};
 mod skill;
 mod library;
@@ -1033,6 +1034,18 @@ pub async fn serve() -> anyhow::Result<()> {
         } else {
             eprintln!("[WARN] bound to {address} but access from the network is off, so other computers get 403. From this computer: PUT /v1/network {{\"enabled\": true}}, then GET /v1/network for the key.");
         }
+    }
+    // Self-signed HTTPS beside plain HTTP when asked: the whole studio over
+    // TLS, so LAN browsers get a secure context (AudioWorklet) too.
+    if let Some(tls_port) = tls::tls_port() {
+        let tls_app = app.clone();
+        let tls_address = SocketAddr::new(address.ip(), tls_port);
+        let data_root = studio_data_root().unwrap_or_else(|| PathBuf::from("."));
+        tokio::spawn(async move {
+            if let Err(error) = tls::serve_tls(tls_app, tls_address, &data_root).await {
+                eprintln!("[ERROR] the HTTPS server did not start: {error:#}");
+            }
+        });
     }
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .with_graceful_shutdown(shutdown())

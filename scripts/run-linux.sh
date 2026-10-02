@@ -9,6 +9,8 @@
 # Environment overrides (all optional):
 #   YUE_BIND_ADDR           bind address; 0.0.0.0 opens the LAN (still key-gated:
 #                         enable network access from loopback, see docs/linux.md)
+#   YUE_TLS_PORT            when set, HTTPS alongside HTTP (self-signed cert in
+#                         the data root; makes LAN browsers secure-context)
 #   YUE_STUDIO_DATA_ROOT  default: ${XDG_DATA_HOME:-~/.local/share}/yue2-studio
 #   YUE_MODELS_ROOT       default: $DATA_ROOT/models/yue2-cpp
 #   YUE_ENGINE_BIN        explicit yue-server binary for a developer build

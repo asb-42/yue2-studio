@@ -106,6 +106,7 @@ documented `data/` layout).
 | Variable | Default | Meaning |
 |---|---|---|
 | `YUE_BIND_ADDR` | loopback (or setup wildcard) | bind address; `0.0.0.0` opens the LAN (still key-gated, see above) |
+| `YUE_TLS_PORT` | unset (HTTP only) | HTTPS port serving the whole studio (self-signed cert in `$DATA/tls/`; makes LAN browsers secure-context) |
 | `YUE_UI_DIR` | `app/dist` beside CWD (set by launcher) | built web interface served by the service itself |
 |---|---|---|
 | `YUE_STUDIO_DATA_ROOT` | `${XDG_DATA_HOME:-~/.local/share}/yue2-studio` | library, media, settings, logs, downloads |

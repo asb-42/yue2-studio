@@ -97,6 +97,41 @@ Open `http://<machine>:8791/?key=<key>` once; API clients send
 `Authorization: Bearer <key>`. The service prints the first-access URL to its
 log at startup and on enable. Without the key the LAN gets 403.
 
+### No key at hand: the SSH tunnel
+
+From the other computer (Linux, macOS, or Windows PowerShell — OpenSSH is
+built in everywhere now):
+
+```sh
+ssh -N -L 8791:localhost:8791 user@192.168.178.50
+# open http://localhost:8791/ — no key needed, the tunnel counts as local
+```
+
+Keep it alive across network naps with `autossh -M 0` in place of `ssh`,
+or just leave a second terminal tab open. The tunnel also solves the one
+LAN limitation below without any certificates.
+
+### LAN limitation: AudioWorklet needs a secure context
+
+The piano-roll editor's synth and the visualiser pop-out feed use
+`AudioWorklet`, which browsers expose only on `localhost`/HTTPS — never on
+plain `http://192.168.x.x`. Those two say so plainly instead of crashing;
+use the SSH tunnel above or the HTTPS option below for them. Everything
+else, MIDI preview included, works over plain LAN http.
+
+### LAN over HTTPS (no tunnel, one click-through)
+
+```sh
+YUE_BIND_ADDR=0.0.0.0 YUE_TLS_PORT=8792 ./scripts/run-linux.sh --build
+```
+
+The service generates a self-signed certificate on first start (kept in the
+data root, `tls/`), prints its SHA-256 fingerprint to the log, and serves
+the whole studio — UI and API — on the TLS port alongside plain HTTP.
+Open `https://<machine>:8792/`, check the fingerprint matches the log once,
+accept, and the browser treats the page as secure: editor and visualiser feed
+work.
+
 ## Drive it from an agent (MCP)
 
 As upstream: while the service runs, `http://127.0.0.1:8791/mcp`
