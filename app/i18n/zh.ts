@@ -1649,6 +1649,8 @@ export const zh = {
     filesTitle: '文件',
     filesDock: '收回侧边栏',
     filesShowInFolder: '在文件夹中显示',
+    playExternally: '在系统播放器中打开',
+    playExternallyHint: '在工作室电脑上播放（VLC、mpv……）',
     proxyTitle: '代理',
     proxyIntro: '工作室从互联网获取的一切都经由它：模型、Hugging Face、OpenRouter、歌词和更新。本机上的工作室引擎从不经过代理。',
     proxyModeSystem: '跟随 Windows',

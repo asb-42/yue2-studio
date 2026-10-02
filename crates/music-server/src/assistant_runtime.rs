@@ -13,7 +13,6 @@
 //! install after their publisher re-uploaded them.
 
 use std::fs;
-use std::io;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -57,6 +56,139 @@ pub struct Asset {
     pub vram_gb: Option<u32>,
     pub note: &'static str,
 }
+
+/// Release locations per platform, verified against the b11236 release page:
+/// Windows zips, Ubuntu tarballs (x64 and arm64; sizes are display-only, the
+/// real figure comes from the server at download time). ARM64 has no CUDA 12
+/// build (no pre-Turing CUDA card exists on ARM), so its CUDA 12 entries name
+/// the CUDA 13 arm64 archives unpacked into the same `cuda12` directory the
+/// card flavour looks in.
+#[cfg(windows)]
+const LLAMA_CUDA_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-win-cuda-13.4-x64.zip";
+#[cfg(all(not(windows), target_arch = "x86_64"))]
+const LLAMA_CUDA_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-ubuntu-cuda-13.4-x64.tar.gz";
+#[cfg(all(not(windows), target_arch = "aarch64"))]
+const LLAMA_CUDA_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-ubuntu-cuda-13.4-arm64.tar.gz";
+#[cfg(all(not(windows), not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+const LLAMA_CUDA_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-ubuntu-cuda-13.4-x64.tar.gz";
+#[cfg(windows)]
+const LLAMA_CUDA_FILE: &str = "runtime/llama-cuda.zip";
+#[cfg(not(windows))]
+const LLAMA_CUDA_FILE: &str = "runtime/llama-cuda.tar.gz";
+#[cfg(windows)]
+const LLAMA_CUDA_BYTES: u64 = 153_540_960;
+#[cfg(all(not(windows), target_arch = "x86_64"))]
+const LLAMA_CUDA_BYTES: u64 = 152_868_922;
+#[cfg(all(not(windows), target_arch = "aarch64"))]
+const LLAMA_CUDA_BYTES: u64 = 148_167_389;
+#[cfg(all(not(windows), not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+const LLAMA_CUDA_BYTES: u64 = 152_868_922;
+#[cfg(windows)]
+const LLAMA_CUDART_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/cudart-llama-bin-win-cuda-13.4-x64.zip";
+#[cfg(all(not(windows), target_arch = "x86_64"))]
+const LLAMA_CUDART_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/cudart-llama-b11236-bin-ubuntu-cuda-13.4-x64.tar.gz";
+#[cfg(all(not(windows), target_arch = "aarch64"))]
+const LLAMA_CUDART_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/cudart-llama-b11236-bin-ubuntu-cuda-13.4-arm64.tar.gz";
+#[cfg(all(not(windows), not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+const LLAMA_CUDART_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/cudart-llama-b11236-bin-ubuntu-cuda-13.4-x64.tar.gz";
+#[cfg(windows)]
+const LLAMA_CUDART_FILE: &str = "runtime/cudart.zip";
+#[cfg(not(windows))]
+const LLAMA_CUDART_FILE: &str = "runtime/cudart.tar.gz";
+#[cfg(windows)]
+const LLAMA_CUDART_BYTES: u64 = 423_535_356;
+#[cfg(all(not(windows), target_arch = "x86_64"))]
+const LLAMA_CUDART_BYTES: u64 = 440_236_534;
+#[cfg(all(not(windows), target_arch = "aarch64"))]
+const LLAMA_CUDART_BYTES: u64 = 552_521_503;
+#[cfg(all(not(windows), not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+const LLAMA_CUDART_BYTES: u64 = 440_236_534;
+/// The proof a CUDA companion archive unpacked: the Windows DLL prefix, the
+/// Linux SONAME prefix (`libcudart.so.13`).
+#[cfg(windows)]
+const LLAMA_CUDART_MARKER: &str = "cudart64";
+#[cfg(not(windows))]
+const LLAMA_CUDART_MARKER: &str = "libcudart";
+#[cfg(windows)]
+const LLAMA_CUDA12_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-win-cuda-12.4-x64.zip";
+#[cfg(all(not(windows), target_arch = "x86_64"))]
+const LLAMA_CUDA12_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-ubuntu-cuda-12.8-x64.tar.gz";
+#[cfg(all(not(windows), target_arch = "aarch64"))]
+const LLAMA_CUDA12_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-ubuntu-cuda-13.4-arm64.tar.gz";
+#[cfg(all(not(windows), not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+const LLAMA_CUDA12_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-ubuntu-cuda-12.8-x64.tar.gz";
+#[cfg(windows)]
+const LLAMA_CUDA12_FILE: &str = "runtime/llama-cuda12.zip";
+#[cfg(not(windows))]
+const LLAMA_CUDA12_FILE: &str = "runtime/llama-cuda12.tar.gz";
+#[cfg(windows)]
+const LLAMA_CUDA12_BYTES: u64 = 264_523_826;
+#[cfg(all(not(windows), target_arch = "x86_64"))]
+const LLAMA_CUDA12_BYTES: u64 = 172_237_886;
+#[cfg(all(not(windows), target_arch = "aarch64"))]
+const LLAMA_CUDA12_BYTES: u64 = 148_167_389;
+#[cfg(all(not(windows), not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+const LLAMA_CUDA12_BYTES: u64 = 172_237_886;
+#[cfg(windows)]
+const LLAMA_CUDART12_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/cudart-llama-bin-win-cuda-12.4-x64.zip";
+#[cfg(all(not(windows), target_arch = "x86_64"))]
+const LLAMA_CUDART12_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/cudart-llama-b11236-bin-ubuntu-cuda-12.8-x64.tar.gz";
+#[cfg(all(not(windows), target_arch = "aarch64"))]
+const LLAMA_CUDART12_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/cudart-llama-b11236-bin-ubuntu-cuda-13.4-arm64.tar.gz";
+#[cfg(all(not(windows), not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+const LLAMA_CUDART12_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/cudart-llama-b11236-bin-ubuntu-cuda-12.8-x64.tar.gz";
+#[cfg(windows)]
+const LLAMA_CUDART12_FILE: &str = "runtime/cudart12.zip";
+#[cfg(not(windows))]
+const LLAMA_CUDART12_FILE: &str = "runtime/cudart12.tar.gz";
+#[cfg(windows)]
+const LLAMA_CUDART12_BYTES: u64 = 391_443_627;
+#[cfg(all(not(windows), target_arch = "x86_64"))]
+const LLAMA_CUDART12_BYTES: u64 = 594_377_263;
+#[cfg(all(not(windows), target_arch = "aarch64"))]
+const LLAMA_CUDART12_BYTES: u64 = 552_521_503;
+#[cfg(all(not(windows), not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+const LLAMA_CUDART12_BYTES: u64 = 594_377_263;
+#[cfg(windows)]
+const LLAMA_VULKAN_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-win-vulkan-x64.zip";
+#[cfg(all(not(windows), target_arch = "x86_64"))]
+const LLAMA_VULKAN_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-ubuntu-vulkan-x64.tar.gz";
+#[cfg(all(not(windows), target_arch = "aarch64"))]
+const LLAMA_VULKAN_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-ubuntu-vulkan-arm64.tar.gz";
+#[cfg(all(not(windows), not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+const LLAMA_VULKAN_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-ubuntu-vulkan-x64.tar.gz";
+#[cfg(windows)]
+const LLAMA_VULKAN_FILE: &str = "runtime/llama-vulkan.zip";
+#[cfg(not(windows))]
+const LLAMA_VULKAN_FILE: &str = "runtime/llama-vulkan.tar.gz";
+#[cfg(windows)]
+const LLAMA_VULKAN_BYTES: u64 = 33_064_176;
+#[cfg(all(not(windows), target_arch = "x86_64"))]
+const LLAMA_VULKAN_BYTES: u64 = 31_351_800;
+#[cfg(all(not(windows), target_arch = "aarch64"))]
+const LLAMA_VULKAN_BYTES: u64 = 24_665_369;
+#[cfg(all(not(windows), not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+const LLAMA_VULKAN_BYTES: u64 = 31_351_800;
+#[cfg(windows)]
+const LLAMA_CPU_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-win-cpu-x64.zip";
+#[cfg(all(not(windows), target_arch = "x86_64"))]
+const LLAMA_CPU_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-ubuntu-x64.tar.gz";
+#[cfg(all(not(windows), target_arch = "aarch64"))]
+const LLAMA_CPU_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-ubuntu-arm64.tar.gz";
+#[cfg(all(not(windows), not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+const LLAMA_CPU_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-ubuntu-x64.tar.gz";
+#[cfg(windows)]
+const LLAMA_CPU_FILE: &str = "runtime/llama-cpu.zip";
+#[cfg(not(windows))]
+const LLAMA_CPU_FILE: &str = "runtime/llama-cpu.tar.gz";
+#[cfg(windows)]
+const LLAMA_CPU_BYTES: u64 = 19_160_483;
+#[cfg(all(not(windows), target_arch = "x86_64"))]
+const LLAMA_CPU_BYTES: u64 = 17_406_283;
+#[cfg(all(not(windows), target_arch = "aarch64"))]
+const LLAMA_CPU_BYTES: u64 = 13_495_515;
+#[cfg(all(not(windows), not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+const LLAMA_CPU_BYTES: u64 = 17_406_283;
 
 pub const ASSETS: &[Asset] = &[
     Asset {
@@ -123,9 +255,9 @@ pub const ASSETS: &[Asset] = &[
         id: "llama-cuda",
         label: "llama.cpp runtime (CUDA 13.4)",
         kind: AssetKind::Runtime,
-        url: "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-win-cuda-13.4-x64.zip",
-        relative_path: "runtime/llama-cuda.zip",
-        bytes: 153_540_960,
+        url: LLAMA_CUDA_URL,
+        relative_path: LLAMA_CUDA_FILE,
+        bytes: LLAMA_CUDA_BYTES,
         unzip_into: Some("cuda"),
         marker: "llama-server",
         vram_gb: None,
@@ -135,11 +267,11 @@ pub const ASSETS: &[Asset] = &[
         id: "llama-cuda-runtime",
         label: "CUDA runtime for llama.cpp",
         kind: AssetKind::Runtime,
-        url: "https://github.com/ggml-org/llama.cpp/releases/download/b11236/cudart-llama-bin-win-cuda-13.4-x64.zip",
-        relative_path: "runtime/cudart.zip",
-        bytes: 423_535_356,
+        url: LLAMA_CUDART_URL,
+        relative_path: LLAMA_CUDART_FILE,
+        bytes: LLAMA_CUDART_BYTES,
         unzip_into: Some("cuda"),
-        marker: "cudart64",
+        marker: LLAMA_CUDART_MARKER,
         vram_gb: None,
         note: "The CUDA libraries llama.cpp links against.",
     },
@@ -149,9 +281,9 @@ pub const ASSETS: &[Asset] = &[
         id: "llama-cuda12",
         label: "llama.cpp runtime (CUDA 12.4)",
         kind: AssetKind::Runtime,
-        url: "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-win-cuda-12.4-x64.zip",
-        relative_path: "runtime/llama-cuda12.zip",
-        bytes: 264_523_826,
+        url: LLAMA_CUDA12_URL,
+        relative_path: LLAMA_CUDA12_FILE,
+        bytes: LLAMA_CUDA12_BYTES,
         unzip_into: Some("cuda12"),
         marker: "llama-server",
         vram_gb: None,
@@ -161,11 +293,11 @@ pub const ASSETS: &[Asset] = &[
         id: "llama-cuda12-runtime",
         label: "CUDA 12 runtime for llama.cpp",
         kind: AssetKind::Runtime,
-        url: "https://github.com/ggml-org/llama.cpp/releases/download/b11236/cudart-llama-bin-win-cuda-12.4-x64.zip",
-        relative_path: "runtime/cudart12.zip",
-        bytes: 391_443_627,
+        url: LLAMA_CUDART12_URL,
+        relative_path: LLAMA_CUDART12_FILE,
+        bytes: LLAMA_CUDART12_BYTES,
         unzip_into: Some("cuda12"),
-        marker: "cudart64",
+        marker: LLAMA_CUDART_MARKER,
         vram_gb: None,
         note: "The CUDA 12 libraries llama.cpp links against.",
     },
@@ -175,9 +307,9 @@ pub const ASSETS: &[Asset] = &[
         id: "llama-vulkan",
         label: "llama.cpp runtime (Vulkan)",
         kind: AssetKind::Runtime,
-        url: "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-win-vulkan-x64.zip",
-        relative_path: "runtime/llama-vulkan.zip",
-        bytes: 33_064_176,
+        url: LLAMA_VULKAN_URL,
+        relative_path: LLAMA_VULKAN_FILE,
+        bytes: LLAMA_VULKAN_BYTES,
         unzip_into: Some("vulkan"),
         marker: "llama-server",
         vram_gb: None,
@@ -187,9 +319,9 @@ pub const ASSETS: &[Asset] = &[
         id: "llama-cpu",
         label: "llama.cpp runtime (CPU)",
         kind: AssetKind::Runtime,
-        url: "https://github.com/ggml-org/llama.cpp/releases/download/b11236/llama-b11236-bin-win-cpu-x64.zip",
-        relative_path: "runtime/llama-cpu.zip",
-        bytes: 19_160_483,
+        url: LLAMA_CPU_URL,
+        relative_path: LLAMA_CPU_FILE,
+        bytes: LLAMA_CPU_BYTES,
         unzip_into: Some("cpu"),
         marker: "llama-server",
         vram_gb: None,
@@ -497,7 +629,9 @@ impl AssistantRuntime {
             let target = self.path_of(asset);
             let outcome = match download_asset(&self.http, asset, &target, &self.state, base, self.cancel.clone()).await {
                 Ok(()) => match asset.unzip_into {
-                    Some(flavour) => extract_zip(&target, &self.root.join("runtime").join(flavour)),
+                    // Tarballs on Linux, zips on Windows; the llama archives
+                    // hold only this runtime, so everything unpacked is kept.
+                    Some(flavour) => crate::downloads::extract_archive(&target, &self.root.join("runtime").join(flavour), &[]),
                     None => Ok(()),
                 },
                 Err(error) => Err(error),
@@ -555,7 +689,8 @@ impl AssistantRuntime {
             match outcome {
                 Ok(()) => {
                     let extraction = match asset.unzip_into {
-                        Some(flavour) => extract_zip(&target, &root.join("runtime").join(flavour)),
+                        // As above: tarballs on Linux, zips on Windows.
+                        Some(flavour) => crate::downloads::extract_archive(&target, &root.join("runtime").join(flavour), &[]),
                         None => Ok(()),
                     };
                     if let Some(progress) = guard.download.as_mut() {
@@ -774,28 +909,6 @@ async fn download_asset(
     Ok(())
 }
 
-/// Extracts a llama.cpp release zip. Entries are flattened into `destination`
-/// because the releases nest their binaries one directory deep.
-fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
-    fs::create_dir_all(destination).with_context(|| format!("create {}", destination.display()))?;
-    let file = fs::File::open(archive).with_context(|| format!("open {}", archive.display()))?;
-    let mut zip = zip::ZipArchive::new(file).with_context(|| format!("read {}", archive.display()))?;
-    for index in 0..zip.len() {
-        let mut entry = zip.by_index(index).context("read zip entry")?;
-        if entry.is_dir() {
-            continue;
-        }
-        let Some(name) = entry.enclosed_name().and_then(|path| path.file_name().map(|name| name.to_owned())) else {
-            continue;
-        };
-        let target = destination.join(name);
-        let mut out = fs::File::create(&target).with_context(|| format!("create {}", target.display()))?;
-        io::copy(&mut entry, &mut out).with_context(|| format!("extract {}", target.display()))?;
-    }
-    fs::remove_file(archive).ok();
-    Ok(())
-}
-
 fn free_port() -> Result<u16> {
     let listener = TcpListener::bind("127.0.0.1:0").context("reserve a port for llama-server")?;
     Ok(listener.local_addr()?.port())
@@ -835,6 +948,22 @@ mod tests {
             assert!(entry.url.contains(LLAMA_BUILD), "{} is not pinned", entry.id);
             assert!(entry.unzip_into.is_some(), "{} has nowhere to extract to", entry.id);
             assert!(!entry.marker.is_empty(), "{} has no proof of extraction", entry.id);
+        }
+    }
+
+    /// Linux downloads Ubuntu tarballs, not Windows zips; ARM64 has no CUDA
+    /// 12 build, so its CUDA 12 entries name the CUDA 13 arm64 archives.
+    #[test]
+    #[cfg(not(windows))]
+    fn linux_runtimes_are_ubuntu_tarballs() {
+        for entry in ASSETS.iter().filter(|entry| entry.kind == AssetKind::Runtime) {
+            assert!(entry.url.ends_with(".tar.gz"), "{}: {}", entry.id, entry.url);
+            assert!(entry.relative_path.ends_with(".tar.gz"), "{}: {}", entry.id, entry.relative_path);
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            let cuda12 = asset("llama-cuda12").expect("the CUDA 12 runtime");
+            assert!(cuda12.url.contains("cuda-13.4-arm64"), "{}", cuda12.url);
         }
     }
 

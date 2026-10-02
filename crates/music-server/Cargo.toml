@@ -17,7 +17,9 @@ anyhow.workspace = true
 # "today" and dates the agent names, in this computer's time zone.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # The folder picker for "use models I already have", the same crate Dub Studio uses.
-rfd = "0.17"
+# Windows-only: on Linux headless/server use the API takes an explicit `path`
+# instead (see setup_adopt), so the GUI dialog stack (wayland/GTK) is not a
+# hard build dependency of the Linux fork.
 base64.workspace = true
 axum.workspace = true
 fs2.workspace = true
@@ -56,3 +58,7 @@ tower-http.workspace = true
 tower = { version = "0.5", features = ["util"] }
 uuid.workspace = true
 zip.workspace = true
+tar.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+rfd = "0.17"

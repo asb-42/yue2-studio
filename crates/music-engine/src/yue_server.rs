@@ -65,6 +65,23 @@ pub struct YueServerLaunchConfig {
     pub options: YueServerOptions,
 }
 
+/// The runtime-loaded CUDA backend library: `ggml-cuda.dll` on Windows,
+/// `libggml-cuda.so` on Linux. A release keeps one per toolkit in folders of
+/// their own (`hardware::CudaBuild::folder`); a developer build keeps its one
+/// beside the executable.
+#[cfg(windows)]
+fn cuda_backend_filename() -> &'static str {
+    "ggml-cuda.dll"
+}
+
+/// The runtime-loaded CUDA backend library: `ggml-cuda.dll` on Windows,
+/// `libggml-cuda.so` on Linux. A release keeps one per toolkit in folders of
+/// their own (`hardware::CudaBuild::folder`); a developer build keeps its one
+/// beside the executable.
+#[cfg(not(windows))]
+fn cuda_backend_filename() -> &'static str {
+    "libggml-cuda.so"
+}
 /// The ggml backend the engine computes on. The bundled engine loads its
 /// backends at run time, so one build serves NVIDIA (CUDA), AMD and Intel
 /// (Vulkan) and the processor; `Auto` lets ggml take the best device it finds.
@@ -200,16 +217,16 @@ impl YueServerLocation {
 
 impl YueServerLaunchConfig {
     /// The CUDA backend the engine loads. A developer build keeps its one
-    /// `ggml-cuda.dll` beside the executable, which ggml finds by itself; a
+    /// backend beside the executable, which ggml finds by itself; a
     /// release has only the folders, and one missing is a broken install.
     pub fn cuda_backend(&self) -> Result<Option<PathBuf>> {
         let Some(folder) = self.options.cuda_folder else { return Ok(None) };
         let directory = self.executable.parent().context("the engine executable has no folder")?;
-        let backend = directory.join(folder).join("ggml-cuda.dll");
+        let backend = directory.join(folder).join(cuda_backend_filename());
         if backend.is_file() {
             return Ok(Some(backend));
         }
-        if directory.join("ggml-cuda.dll").is_file() {
+        if directory.join(cuda_backend_filename()).is_file() {
             return Ok(None);
         }
         bail!("the engine's CUDA backend {} is missing; reinstall the studio", backend.display())
@@ -615,10 +632,10 @@ mod tests {
         // A release without the folder is broken, never quietly off CUDA.
         assert!(config(Some("cuda12")).cuda_backend().is_err());
         fs::create_dir_all(root.join("cuda12")).unwrap();
-        fs::write(root.join("cuda12").join("ggml-cuda.dll"), b"x").unwrap();
-        assert_eq!(config(Some("cuda12")).cuda_backend().unwrap(), Some(root.join("cuda12").join("ggml-cuda.dll")));
+        fs::write(root.join("cuda12").join(cuda_backend_filename()), b"x").unwrap();
+        assert_eq!(config(Some("cuda12")).cuda_backend().unwrap(), Some(root.join("cuda12").join(cuda_backend_filename())));
         // A developer build: the one backend beside the executable.
-        fs::write(root.join("ggml-cuda.dll"), b"x").unwrap();
+        fs::write(root.join(cuda_backend_filename()), b"x").unwrap();
         assert_eq!(config(Some("cuda13")).cuda_backend().unwrap(), None);
         fs::remove_dir_all(&root).ok();
     }

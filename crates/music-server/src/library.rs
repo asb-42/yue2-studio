@@ -222,7 +222,14 @@ impl Library {
   let root=self.media_dir.canonicalize().ok()?;
   let stored=PathBuf::from(stored);
   if let Ok(path)=stored.canonicalize(){if path.starts_with(&root){return Some(path)}}
-  let by_name=self.media_dir.join(stored.file_name()?).canonicalize().ok()?;
+  // By file name, across platforms: a path stored on Windows carries `\` and
+  // a drive letter, which Linux treats as ordinary characters, so `file_name`
+  // alone returns the whole string there. The last segment on either
+  // separator is the file, on both systems.
+  let whole=stored.file_name()?.to_str()?;
+  let name=whole.rsplit(['/', '\\']).next()?.trim();
+  if name.is_empty()||name.contains(".."){return None}
+  let by_name=self.media_dir.join(name).canonicalize().ok()?;
   by_name.starts_with(&root).then_some(by_name)
  }
  pub fn media_path_for_song(&self,song:&Song)->Option<PathBuf>{self.resolve_media(song.audio_path.as_ref()?)}

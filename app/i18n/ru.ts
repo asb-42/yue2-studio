@@ -1653,6 +1653,8 @@ export const ru = {
     filesTitle: 'Файлы',
     filesDock: 'Убрать в боковую панель',
     filesShowInFolder: 'Показать в папке',
+    playExternally: 'Открыть в системном плеере',
+    playExternallyHint: 'Играет на компьютере студии (VLC, mpv, …)',
     proxyTitle: 'Прокси',
     proxyIntro: 'Через него идёт всё, что студия берёт из интернета: модели, Hugging Face, OpenRouter, тексты песен и обновления. Свой движок на этом компьютере — никогда.',
     proxyModeSystem: 'Как в Windows',

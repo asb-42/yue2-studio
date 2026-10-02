@@ -1649,6 +1649,8 @@ export const ja = {
     filesTitle: 'ファイル',
     filesDock: 'サイドバーに戻す',
     filesShowInFolder: 'フォルダーで表示',
+    playExternally: 'システムプレーヤーで再生',
+    playExternallyHint: 'スタジオのコンピューターで再生（VLC、mpv、…）',
     proxyTitle: 'プロキシ',
     proxyIntro: 'スタジオがインターネットから取得するものはすべてここを通ります：モデル、Hugging Face、OpenRouter、歌詞、アップデート。このPC上のスタジオ自身のエンジンは通りません。',
     proxyModeSystem: 'Windows に従う',

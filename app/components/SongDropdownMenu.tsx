@@ -3,7 +3,7 @@ import { useKaraokeStatus } from '../services/studioQueries';
 import { hasSungLines, karaokeReason } from '../services/karaoke';
 import { Song } from '../types';
 import { useI18n } from '../context/I18nContext';
-import { openExternal } from '../services/externalLinks';
+import { isLocalService, openExternal } from '../services/externalLinks';
 import { apiUrl } from '../services/apiBase';
 import { downloadSongAudio } from '../services/songDownload';
 import { openMidi, openStems } from '../services/openStems';
@@ -20,6 +20,7 @@ import {
     Trash2,
     Loader2,
     Mic2,
+    Play,
     Scissors,
     FileMusic,
     Wand2,
@@ -153,6 +154,30 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
         return () => watch.disconnect();
     }, [isOpen, direction]);
     const { ready: karaokeReady, busy: karaokeBusy, make: makeKaraoke, failed: karaokeFailed } = useKaraoke(song, actions.update);
+
+    // A library track in the studio computer's own player (VLC, mpv, ...):
+    // the Linux replacement for handing playback to a desktop player.
+    // Offered only where the service is local, so a remote browser does not
+    // start playback on somebody else's computer.
+    const [playBusy, setPlayBusy] = useState(false);
+    const [playFailed, setPlayFailed] = useState<string | null>(null);
+    const playExternal = async () => {
+        setPlayBusy(true);
+        setPlayFailed(null);
+        try {
+            const response = await fetch(`/v1/library/songs/${encodeURIComponent(song.id)}/play-external`, { method: 'POST' });
+            const body = await response.json().catch(() => null);
+            if (!response.ok) {
+                setPlayFailed(body?.error || `${response.status}`);
+                return;
+            }
+            onClose();
+        } catch (error) {
+            setPlayFailed(error instanceof Error ? error.message : String(error));
+        } finally {
+            setPlayBusy(false);
+        }
+    };
 
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
@@ -313,6 +338,15 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
                 label={t('download')}
                 onClick={handleDownload}
             />
+            {isLocalService() && song.audioUrl && (
+                <MenuItem
+                    icon={playBusy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+                    label={t('playExternally')}
+                    onClick={() => void playExternal()}
+                    disabled={playBusy}
+                    hint={playFailed ?? undefined}
+                />
+            )}
 
             {/* Owner-only Actions */}
             {isOwner && (

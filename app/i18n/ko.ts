@@ -1649,6 +1649,8 @@ export const ko = {
     filesTitle: '파일',
     filesDock: '사이드바로 되돌리기',
     filesShowInFolder: '폴더에서 보기',
+    playExternally: '시스템 플레이어로 재생',
+    playExternallyHint: '스튜디오 컴퓨터에서 재생 (VLC, mpv, …)',
     proxyTitle: '프록시',
     proxyIntro: '스튜디오가 인터넷에서 가져오는 모든 것이 이곳을 거칩니다: 모델, Hugging Face, OpenRouter, 가사, 업데이트. 이 컴퓨터의 스튜디오 엔진은 거치지 않습니다.',
     proxyModeSystem: 'Windows 설정 따름',

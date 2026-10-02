@@ -1654,6 +1654,8 @@ export const en = {
     filesTitle: 'Files',
     filesDock: 'Back to the sidebar',
     filesShowInFolder: 'Show in folder',
+    playExternally: 'Play in system player',
+    playExternallyHint: 'Plays on the studio computer (VLC, mpv, …)',
     proxyTitle: 'Proxy',
     proxyIntro: 'Everything the studio fetches from the internet goes through it: models, Hugging Face, OpenRouter, lyrics and updates. The engine on this computer never does.',
     proxyModeSystem: 'As in Windows',

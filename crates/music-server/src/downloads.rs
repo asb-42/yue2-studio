@@ -263,6 +263,15 @@ impl Downloader {
         if pending.is_empty() {
             return Ok(());
         }
+        // No Windows machine code on Linux, ever: refuse before a single
+        // byte moves, naming the asset so the panel can say why.
+        #[cfg(not(windows))]
+        if let Some(refused) = pending.iter().find(|asset| is_windows_binary_asset(asset)) {
+            bail!(
+                "{} is a Windows-only download and cannot run on Linux; build it from the pinned sources or point the matching *_BIN override (YUE_TRAIN_BIN, YUE_CAPTION_BIN, YUE_MIDI_BIN, MUSIC_VST_HOST_BIN) at a native build",
+                refused.label
+            );
+        }
 
         let total: u64 = pending.iter().map(|asset| asset.bytes).sum();
         let mut progress = self.progress.lock().await;
@@ -376,7 +385,9 @@ impl Downloader {
         let target = self.path_of(asset);
         fetch(&self.http, asset, &target, cell, self.cancel.clone()).await?;
         if let Some(flavour) = asset.unzip_into {
-            extract_zip(&target, &self.root.join("runtime").join(flavour))?;
+            // On Linux the runtime archives are .tar.gz holding far more than
+            // the loader reads; only the libraries land beside the engine.
+            extract_runtime_archive(&target, &self.root.join("runtime").join(flavour))?;
         }
         Ok(())
     }
@@ -384,6 +395,14 @@ impl Downloader {
     /// Starts one download in the background. Only one runs at a time, and an
     /// interrupted file resumes from what is already on disk.
     pub async fn install(&self, asset: &'static Asset) -> Result<()> {
+        // As in install_all: Windows machine code never lands on Linux.
+        #[cfg(not(windows))]
+        if is_windows_binary_asset(asset) {
+            bail!(
+                "{} is a Windows-only download and cannot run on Linux; build it from the pinned sources or point the matching *_BIN override (YUE_TRAIN_BIN, YUE_CAPTION_BIN, YUE_MIDI_BIN, MUSIC_VST_HOST_BIN) at a native build",
+                asset.label
+            );
+        }
         {
             let mut progress = self.progress.lock().await;
             if progress.as_ref().is_some_and(|active| !active.done && active.error.is_none()) {
@@ -427,7 +446,7 @@ impl Downloader {
             let mut guard = progress.lock().await;
             let error = match outcome {
                 Ok(()) => match asset.unzip_into {
-                    Some(flavour) => extract_zip(&target, &root.join("runtime").join(flavour)).err().map(|error| error.to_string()),
+                    Some(flavour) => extract_runtime_archive(&target, &root.join("runtime").join(flavour)).err().map(|error| error.to_string()),
                     None => None,
                 },
                 Err(error) => Some(error.to_string()),
@@ -568,6 +587,17 @@ fn extract_named_local(archive: &Path, wanted: &[&str], destination: &Path) -> R
     Ok(())
 }
 
+/// Whether this asset delivers a Windows binary (an `.exe` beside the marker
+/// or a Windows `.dll`): it can never run on Linux, so the Linux installer
+/// refuses it instead of fetching hundreds of megabytes of the wrong machine
+/// code. The Linux answer is a native build from the pinned sources (or the
+/// module's `*_BIN` environment override pointing at one) — see
+/// `docs/plans/linux-port.md`.
+pub fn is_windows_binary_asset(asset: &Asset) -> bool {
+    let marker = asset.marker.to_ascii_lowercase();
+    marker.ends_with(".exe") || marker.ends_with(".dll")
+}
+
 /// The file a picked archive entry lands as: its base name.
 pub fn picked_file_name(entry: &str) -> &str {
     entry.rsplit('/').next().unwrap_or(entry)
@@ -599,6 +629,61 @@ pub fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
     }
     fs::remove_file(archive).ok();
     Ok(())
+}
+
+/// Unpacks a release `.tar.gz`, the Linux shape of what `extract_zip` does
+/// for `.zip`. Entries are flattened into `destination` because the releases
+/// nest their files one directory deep; when `keep` is non-empty only entries
+/// whose file name starts with one of it are kept (the ONNX Runtime archives
+/// carry headers and build files nobody loads).
+///
+/// Links are unpacked as links: both archives ship relative symlinks
+/// (`libonnxruntime.so` to its versioned file, `libllama.so` the same) that
+/// only resolve when the pointed-at name lands beside them.
+pub fn extract_tgz(archive: &Path, destination: &Path, keep: &[&str]) -> Result<()> {
+    fs::create_dir_all(destination).with_context(|| format!("create {}", destination.display()))?;
+    let file = fs::File::open(archive).with_context(|| format!("open {}", archive.display()))?;
+    let gz = flate2::read::GzDecoder::new(file);
+    let mut tar = tar::Archive::new(gz);
+    for entry in tar.entries().with_context(|| format!("read {}", archive.display()))? {
+        let mut entry = entry.with_context(|| format!("read an entry of {}", archive.display()))?;
+        if entry.header().entry_type().is_dir() {
+            continue;
+        }
+        let path = entry.path().with_context(|| format!("read an entry name of {}", archive.display()))?;
+        let Some(name) = path.file_name().map(|name| name.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        if !keep.is_empty() && !keep.iter().any(|prefix| name.starts_with(prefix)) {
+            continue;
+        }
+        // The base name, not the archived path: `..` in an entry cannot escape
+        // the destination when only the last segment is ever joined onto it.
+        entry.unpack(destination.join(&name)).with_context(|| format!("extract {name}"))?;
+    }
+    fs::remove_file(archive).ok();
+    Ok(())
+}
+
+/// Unpacks a release archive by its file name: `.zip` the Windows way,
+/// `.tar.gz`/`.tgz` the Linux way. `keep` filters tar.gz entries as in
+/// `extract_tgz` and is ignored for zips.
+pub fn extract_archive(archive: &Path, destination: &Path, keep: &[&str]) -> Result<()> {
+    let name = archive.to_string_lossy().to_ascii_lowercase();
+    if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
+        extract_tgz(archive, destination, keep)
+    } else {
+        extract_zip(archive, destination)
+    }
+}
+
+/// Unpacks a downloaded runtime for the shared downloader: zips the Windows
+/// way, tarballs keeping only the ONNX libraries. The tarballs are the only
+/// archives this downloader fetches on Linux (the ONNX Runtime builds; every
+/// other Linux runtime goes through its own module), so the filter lives here
+/// rather than on every asset.
+fn extract_runtime_archive(archive: &Path, destination: &Path) -> Result<()> {
+    extract_archive(archive, destination, &["libonnxruntime"])
 }
 
 /// The first executable named `name` in the given flavour directories, in
@@ -693,5 +778,88 @@ mod tests {
         assert_eq!(fs::read_to_string(root.join("out").join("readme.txt")).unwrap(), "notes");
         assert!(extract_named_local(&archive, &["bin/arm64-win/DirectML.dll"], &root.join("out")).is_err());
         fs::remove_dir_all(&root).ok();
+    }
+
+    /// Builds a `.tar.gz` the way the Linux releases do: files nested one
+    /// directory deep, plus a relative symlink like the versioned `.so` files
+    /// carry (`libfoo.so` to `libfoo.so.1`).
+    fn sample_tgz(root: &Path) -> PathBuf {
+        let archive = root.join("runtime-linux.tar.gz");
+        let file = fs::File::create(&archive).unwrap();
+        let gz = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        let mut tar = tar::Builder::new(gz);
+        for (path, body) in [("pkg-1.0/lib/libkeep.so.1", "library"), ("pkg-1.0/include/keep.h", "header")] {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            tar.append_data(&mut header, path, body.as_bytes()).unwrap();
+        }
+        let mut link = tar::Header::new_gnu();
+        link.set_entry_type(tar::EntryType::Symlink);
+        link.set_link_name("libkeep.so.1").unwrap();
+        link.set_size(0);
+        link.set_cksum();
+        tar.append_data(&mut link, "pkg-1.0/lib/libkeep.so", std::io::empty()).unwrap();
+        tar.into_inner().unwrap().finish().unwrap();
+        archive
+    }
+
+    #[test]
+    fn a_tarball_unpacks_flat_keeping_links_and_honouring_the_filter() {
+        let root = std::env::temp_dir().join(format!("downloads-tgz-{}", uuid::Uuid::now_v7()));
+        fs::create_dir_all(&root).unwrap();
+        let out = root.join("out");
+        // everything, links included
+        extract_tgz(&sample_tgz(&root), &out, &[]).unwrap();
+        assert_eq!(fs::read_to_string(out.join("libkeep.so.1")).unwrap(), "library");
+        assert_eq!(fs::read_to_string(out.join("keep.h")).unwrap(), "header");
+        assert_eq!(fs::read_to_string(out.join("libkeep.so")).unwrap(), "library");
+        // the ONNX filter keeps the libraries and drops the headers
+        let out = root.join("filtered");
+        extract_tgz(&sample_tgz(&root), &out, &["libkeep"]).unwrap();
+        assert!(out.join("libkeep.so.1").is_file());
+        assert!(out.join("libkeep.so").is_symlink());
+        assert!(!out.join("keep.h").exists());
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn the_archive_dispatch_follows_the_file_name() {
+        let root = std::env::temp_dir().join(format!("downloads-dispatch-{}", uuid::Uuid::now_v7()));
+        fs::create_dir_all(&root).unwrap();
+        // a zip is not a tarball and the dispatcher must not treat it as one
+        let zip_path = root.join("runtime-win.zip");
+        let mut zip = zip::ZipWriter::new(fs::File::create(&zip_path).unwrap());
+        zip.start_file("nested/tool.exe", zip::write::SimpleFileOptions::default()).unwrap();
+        use std::io::Write;
+        zip.write_all(b"x").unwrap();
+        zip.finish().unwrap();
+        extract_archive(&zip_path, &root.join("win"), &[]).unwrap();
+        assert!(root.join("win").join("tool.exe").is_file());
+        assert!(!zip_path.exists(), "the archive is deleted after unpacking");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn windows_binaries_are_refused_on_linux_only() {
+        let exe = Asset { id: "tool", marker: "tool.exe", ..asset() };
+        let dll = Asset { id: "libs", marker: "some64_12.dll", ..asset() };
+        let model = Asset { id: "weights", marker: "", ..asset() };
+        let runtime = Asset { id: "ort", marker: "libonnxruntime.so", ..asset() };
+        assert!(is_windows_binary_asset(&exe));
+        assert!(is_windows_binary_asset(&dll));
+        assert!(!is_windows_binary_asset(&model));
+        assert!(!is_windows_binary_asset(&runtime));
+        // the refusal itself is cfg-gated; on Windows everything installs
+        #[cfg(not(windows))]
+        {
+            let root = std::env::temp_dir().join(format!("downloads-refuse-{}", uuid::Uuid::now_v7()));
+            let downloader = Downloader::new(root.clone());
+            let exe: &'static Asset = Box::leak(Box::new(Asset { id: "tool", marker: "tool.exe", ..asset() }));
+            let refused = tokio::runtime::Runtime::new().unwrap().block_on(downloader.install(exe));
+            assert!(refused.unwrap_err().to_string().contains("Windows-only"));
+            fs::remove_dir_all(&root).ok();
+        }
     }
 }

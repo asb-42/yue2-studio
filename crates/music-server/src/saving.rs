@@ -211,22 +211,118 @@ pub struct Written {
     path: String,
 }
 
-/// Explorer, open on a file saved here, with the file selected.
+/// A native media player for one file: VLC, mpv and the classics, detached.
+///
+/// The Linux replacement for the desktop shell-outs: where the Windows build
+/// hands playback to its Winamp mode and its Explorer verbs, the fork plays a
+/// saved file or a library track in the player's own window. No shell is ever
+/// involved - the binary is resolved on PATH (or named whole by
+/// `YUE_MEDIA_PLAYER`) and the path goes as one argument, so a file name
+/// cannot become a command.
+pub fn open_in_player(path: &std::path::Path) -> Result<String, String> {
+    // The desktop shell's own default application, via the shell it has.
+    #[cfg(windows)]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path.display().to_string()])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|error| format!("the default application did not start: {error}"))?;
+        return Ok("default application".to_string());
+    }
+    #[cfg(not(windows))]
+    {
+        let player = resolve_media_player(|name| on_search_path(name)).ok_or_else(|| {
+            "no media player was found (VLC, mpv, mplayer): install one, or name it in YUE_MEDIA_PLAYER".to_string()
+        })?;
+        std::process::Command::new(&player)
+            .arg(path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|error| format!("{player} did not start: {error}"))?;
+        return Ok(player);
+    }
+}
+
+/// Native players in order of preference, before the `xdg-open` fallback.
+/// Linux-only: Windows opens the default application (see `open_in_player`).
+#[cfg(not(windows))]
+const MEDIA_PLAYERS: [&str; 5] = ["vlc", "mpv", "mplayer", "celluloid", "totem"];
+
+/// The player a file opens in: `YUE_MEDIA_PLAYER` first - a bare name looked
+/// up the same way, or an absolute path - then the known players in order,
+/// then whatever opens audio on this desktop. Linux-only (see above).
+#[cfg(not(windows))]
+fn resolve_media_player(exists: impl Fn(&str) -> bool) -> Option<String> {
+    if let Some(wanted) = std::env::var("YUE_MEDIA_PLAYER").ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()) {
+        if wanted.contains('/') {
+            return PathBuf::from(&wanted).is_file().then_some(wanted);
+        }
+        if exists(&wanted) {
+            return Some(wanted);
+        }
+        return None;
+    }
+    #[cfg(not(windows))]
+    if let Some(found) = MEDIA_PLAYERS.iter().find(|name| exists(name)) {
+        return Some((*found).to_string());
+    }
+    // No known player: the desktop's default for audio. On Windows the
+    // service never reaches here with a player missing (see open_in_player).
+    #[cfg(not(windows))]
+    if exists("xdg-open") {
+        return Some("xdg-open".to_string());
+    }
+    None
+}
+
+/// Whether the loader would find this binary without help: any directory on
+/// PATH holding a file of that name. Linux-only: player lookup (see above).
+#[cfg(not(windows))]
+fn on_search_path(name: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else { return false };
+    std::env::split_paths(&path).any(|directory| directory.join(name).is_file())
+}
+
+/// A saved file, opened in the native media player. Only files this service
+/// wrote (see `write`) may be opened: a path from the request could name
+/// anything on the machine.
+pub async fn play(Json(file): Json<Written>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let path = PathBuf::from(&file.path);
+    if !saving().lock().expect("saving").written.contains(&path) {
+        return Err(api_error(StatusCode::NOT_FOUND, format!("{} is not a file saved here", path.display())));
+    }
+    match open_in_player(&path) {
+        Ok(player) => Ok(Json(json!({ "player": player, "path": path.display().to_string() }))),
+        Err(error) => Err(api_error(StatusCode::INTERNAL_SERVER_ERROR, error)),
+    }
+}
+
+/// The file manager, open on a file saved here, with the file selected.
 pub async fn reveal(Json(file): Json<Written>) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
     let path = PathBuf::from(&file.path);
     if !saving().lock().expect("saving").written.contains(&path) {
         return Err(api_error(StatusCode::NOT_FOUND, format!("{} is not a file saved here", path.display())));
     }
-    let mut explorer = std::process::Command::new("explorer.exe");
+    #[cfg(windows)]
+    let mut opener = std::process::Command::new("explorer.exe");
+    // No Explorer on Linux: the desktop's own opener (same as the
+    // open-data-directory and dataset-reveal routes use).
+    #[cfg(not(windows))]
+    let mut opener = std::process::Command::new("xdg-open");
     // Explorer reads /select,"path" as one switch; quoting the whole of it
     // breaks the switch.
     #[cfg(windows)]
-    std::os::windows::process::CommandExt::raw_arg(&mut explorer, format!("/select,\"{}\"", path.display()));
+    std::os::windows::process::CommandExt::raw_arg(&mut opener, format!("/select,\"{}\"", path.display()));
     #[cfg(not(windows))]
-    explorer.arg(&path);
-    explorer
+    opener.arg(path.parent().unwrap_or(&path));
+    opener
         .spawn()
-        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Explorer did not open: {error}")))?;
+        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("the file manager did not open: {error}")))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -242,5 +338,65 @@ mod tests {
         assert_eq!(own_path("https://example.com/a.mp3"), None);
         assert_eq!(own_path(&format!("http://127.0.0.1:{}/a", port.wrapping_add(1))), None);
         assert_eq!(own_path("//example.com/a"), None);
+    }
+
+    /// `YUE_MEDIA_PLAYER` held aside: it is process-global and no other test
+    /// reads it, but a developer export must not steer these answers. The
+    /// player tests below share it, so they take the lock in turn.
+    /// Linux-only, like the player lookup itself.
+    #[cfg(not(windows))]
+    static PLAYER_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    #[cfg(not(windows))]
+    struct QuietEnv(Option<std::ffi::OsString>, #[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+    #[cfg(not(windows))]
+    impl QuietEnv {
+        fn hold() -> Self {
+            let guard = PLAYER_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let held = std::env::var_os("YUE_MEDIA_PLAYER");
+            unsafe { std::env::remove_var("YUE_MEDIA_PLAYER") };
+            Self(held, guard)
+        }
+    }
+    #[cfg(not(windows))]
+    impl Drop for QuietEnv {
+        fn drop(&mut self) {
+            if let Some(value) = self.0.take() {
+                unsafe { std::env::set_var("YUE_MEDIA_PLAYER", value) };
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn the_player_is_vlc_first_then_mpv_then_mplayer() {
+        let _held = QuietEnv::hold();
+        let present = |names: Vec<&'static str>| move |name: &str| names.iter().any(|known| *known == name);
+        assert_eq!(resolve_media_player(present(vec!["vlc", "mpv", "mplayer"])).as_deref(), Some("vlc"));
+        assert_eq!(resolve_media_player(present(vec!["mpv", "mplayer"])).as_deref(), Some("mpv"));
+        assert_eq!(resolve_media_player(present(vec!["mplayer"])).as_deref(), Some("mplayer"));
+        assert_eq!(resolve_media_player(present(vec!["celluloid"])).as_deref(), Some("celluloid"));
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn without_a_player_the_desktop_default_opens_audio() {
+        let _held = QuietEnv::hold();
+        assert_eq!(resolve_media_player(|name| name == "xdg-open").as_deref(), Some("xdg-open"));
+        assert_eq!(resolve_media_player(|_| false), None);
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn the_player_override_names_a_binary_or_a_whole_path() {
+        let _held = QuietEnv::hold();
+        unsafe { std::env::set_var("YUE_MEDIA_PLAYER", "mpv") };
+        assert_eq!(resolve_media_player(|name| name == "mpv").as_deref(), Some("mpv"));
+        assert_eq!(resolve_media_player(|_| false), None);
+        let missing = std::env::temp_dir().join(format!("no-player-{}", uuid::Uuid::now_v7()));
+        unsafe { std::env::set_var("YUE_MEDIA_PLAYER", missing.to_string_lossy().to_string()) };
+        assert_eq!(resolve_media_player(|_| true), None);
+        let binary = std::env::current_exe().expect("a test binary");
+        unsafe { std::env::set_var("YUE_MEDIA_PLAYER", binary.to_string_lossy().to_string()) };
+        assert_eq!(resolve_media_player(|_| false).as_deref(), Some(binary.to_string_lossy().as_ref()));
     }
 }

@@ -167,10 +167,63 @@ fn whisper_words_from_json(text: &str) -> Vec<(f64, String)> {
     words
 }
 
+/// Release locations per platform: Windows zips, Linux tarballs (verified
+/// against the v1.30.0 release; sizes are display-only, the real figure comes
+/// from the server at download time). The GPU build follows the engine's
+/// choice of CUDA 12, the one its provider was built against.
+#[cfg(windows)]
+const ONNXRUNTIME_CPU_URL: &str = "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-win-x64-1.30.0.zip";
+#[cfg(all(not(windows), target_arch = "x86_64"))]
+const ONNXRUNTIME_CPU_URL: &str = "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-linux-x64-1.30.0.tgz";
+#[cfg(all(not(windows), target_arch = "aarch64"))]
+const ONNXRUNTIME_CPU_URL: &str = "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-linux-aarch64-1.30.0.tgz";
+#[cfg(all(not(windows), not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+const ONNXRUNTIME_CPU_URL: &str = "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-linux-x64-1.30.0.tgz";
+#[cfg(windows)]
+const ONNXRUNTIME_CPU_FILE: &str = "runtime/onnxruntime.zip";
+#[cfg(not(windows))]
+const ONNXRUNTIME_CPU_FILE: &str = "runtime/onnxruntime.tgz";
+#[cfg(windows)]
+const ONNXRUNTIME_CPU_BYTES: u64 = 82_645_522;
+#[cfg(all(not(windows), target_arch = "x86_64"))]
+const ONNXRUNTIME_CPU_BYTES: u64 = 11_306_877;
+#[cfg(all(not(windows), target_arch = "aarch64"))]
+const ONNXRUNTIME_CPU_BYTES: u64 = 10_269_495;
+#[cfg(all(not(windows), not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+const ONNXRUNTIME_CPU_BYTES: u64 = 11_306_877;
+/// The library name the loader binds: `ort` loads this at run time from the
+/// runtime directory (`machine_runtime`), so it must name the file the
+/// archive actually holds.
+#[cfg(windows)]
+const ONNXRUNTIME_LIBRARY: &str = "onnxruntime.dll";
+#[cfg(not(windows))]
+const ONNXRUNTIME_LIBRARY: &str = "libonnxruntime.so";
+#[cfg(windows)]
+const ONNXRUNTIME_CUDA_URL: &str = "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-win-x64-gpu_cuda12-1.30.0.zip";
+#[cfg(all(not(windows), target_arch = "x86_64"))]
+const ONNXRUNTIME_CUDA_URL: &str = "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-linux-x64-gpu_cuda12-1.30.0.tgz";
+/// No `linux-aarch64-gpu` upstream: ARM CUDA falls back to the processor
+/// build, and `asset` below hides this entry there.
+#[cfg(all(not(windows), target_arch = "aarch64"))]
+const ONNXRUNTIME_CUDA_URL: &str = "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-linux-x64-gpu_cuda12-1.30.0.tgz";
+#[cfg(all(not(windows), not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+const ONNXRUNTIME_CUDA_URL: &str = "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-linux-x64-gpu_cuda12-1.30.0.tgz";
+#[cfg(windows)]
+const ONNXRUNTIME_CUDA_FILE: &str = "runtime/onnxruntime-cuda.zip";
+#[cfg(not(windows))]
+const ONNXRUNTIME_CUDA_FILE: &str = "runtime/onnxruntime-cuda.tgz";
+#[cfg(windows)]
+const ONNXRUNTIME_CUDA_BYTES: u64 = 379_723_801;
+#[cfg(not(windows))]
+const ONNXRUNTIME_CUDA_BYTES: u64 = 439_354_926;
+#[cfg(windows)]
+const ONNXRUNTIME_CUDA_PROVIDER: &str = "onnxruntime_providers_cuda.dll";
+#[cfg(not(windows))]
+const ONNXRUNTIME_CUDA_PROVIDER: &str = "libonnxruntime_providers_cuda.so";
+
 pub const ASSETS: &[Asset] = &[
     Asset {
-        id: "whisper-engine",
-        label: "Whisper (faster-whisper standalone)",
+        id: "whisper-engine",        label: "Whisper (faster-whisper standalone)",
         kind: AssetKind::Runtime,
         url: "https://github.com/Purfview/whisper-standalone-win/releases/download/faster-whisper/Whisper-Faster_r192.3_windows.zip",
         relative_path: "runtime/whisper-faster.zip",
@@ -642,11 +695,11 @@ pub const ASSETS: &[Asset] = &[
         id: "onnxruntime-cuda",
         label: "ONNX Runtime 1.30.0 · CUDA",
         kind: AssetKind::Runtime,
-        url: "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-win-x64-gpu_cuda12-1.30.0.zip",
-        relative_path: "runtime/onnxruntime-cuda.zip",
-        bytes: 379_723_801,
+        url: ONNXRUNTIME_CUDA_URL,
+        relative_path: ONNXRUNTIME_CUDA_FILE,
+        bytes: ONNXRUNTIME_CUDA_BYTES,
         unzip_into: Some("onnx-cuda"),
-        marker: "onnxruntime_providers_cuda.dll",
+        marker: ONNXRUNTIME_CUDA_PROVIDER,
         pick: &[],
         vram_gb: Some(2),
         note: "Runs the separator on an NVIDIA card instead of the processor. Needs CUDA 12.",
@@ -719,11 +772,11 @@ pub const ASSETS: &[Asset] = &[
         id: "onnxruntime",
         label: "ONNX Runtime 1.30.0",
         kind: AssetKind::Runtime,
-        url: "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-win-x64-1.30.0.zip",
-        relative_path: "runtime/onnxruntime.zip",
-        bytes: 82_645_522,
+        url: ONNXRUNTIME_CPU_URL,
+        relative_path: ONNXRUNTIME_CPU_FILE,
+        bytes: ONNXRUNTIME_CPU_BYTES,
         unzip_into: Some("onnx"),
-        marker: "onnxruntime.dll",
+        marker: ONNXRUNTIME_LIBRARY,
         pick: &[],
         vram_gb: None,
         note: "Parakeet runs on this; it is loaded at run time, not linked in.",
@@ -786,8 +839,12 @@ impl OnnxFlavour {
 
     /// Whether work runs on the card through DirectML: every card CUDA does
     /// not run on - AMD, Intel, an NVIDIA card whose driver is too old - as
-    /// long as there is a card at all.
+    /// long as there is a card at all. Windows-only: the DirectML runtime and
+    /// its assets are Windows builds, so this is never the Linux card path.
     pub fn uses_directml(self) -> bool {
+        if cfg!(not(windows)) {
+            return false;
+        }
         let hardware = crate::hardware::hardware();
         !matches!(self, OnnxFlavour::Cpu) && hardware.cuda.is_none() && hardware.gpu_name.is_some()
     }
@@ -842,6 +899,48 @@ fn parakeet_config(card: Option<OnnxCard>) -> Option<parakeet_rs::ExecutionConfi
     card.map(|card| parakeet_rs::ExecutionConfig::new().with_custom_configure(move |builder| Ok(with_card(builder, Some(card)).0)))
 }
 
+/// Whether the system CUDA libraries the provider loads are present.
+/// Display helper for the separation panel; on Windows these ship as
+/// downloads instead (see `has_cuda_libraries`).
+#[cfg(not(windows))]
+pub fn system_cuda_libraries_present() -> bool {
+    system_cuda_provider_libs()
+}
+
+/// Whether the system loader finds the CUDA libraries the provider needs:
+/// cuBLAS, the CUDA runtime and cuDNN. `ldconfig -p` knows the system library
+/// cache; `LD_LIBRARY_PATH` covers toolkit installs outside it.
+#[cfg(not(windows))]
+fn system_cuda_provider_libs() -> bool {
+    const WANTED: [&str; 3] = ["libcublasLt.so", "libcudart.so", "libcudnn.so"];
+    let ldconfig = std::process::Command::new("ldconfig")
+        .arg("-p")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+        .unwrap_or_default();
+    let path_dirs: Vec<PathBuf> = std::env::var_os("LD_LIBRARY_PATH")
+        .map(|paths| std::env::split_paths(&paths).collect())
+        .unwrap_or_default();
+    WANTED.iter().all(|name| system_lib_present(name, &ldconfig, &path_dirs))
+}
+
+/// One SONAME in the loader cache or beside a `LD_LIBRARY_PATH` entry: the
+/// cache prints `libcublasLt.so.12 (...) => /path`, directories hold the
+/// versioned file the `.so` name would resolve to.
+#[cfg(not(windows))]
+fn system_lib_present(name: &str, ldconfig: &str, path_dirs: &[PathBuf]) -> bool {
+    if ldconfig.lines().any(|line| line.trim_start().starts_with(name)) {
+        return true;
+    }
+    path_dirs.iter().any(|directory| {
+        std::fs::read_dir(directory)
+            .map(|entries| entries.flatten().any(|entry| entry.file_name().to_string_lossy().starts_with(name)))
+            .unwrap_or(false)
+    })
+}
+
 /// Puts a session on the card a path reaches: CUDA, or DirectML with what it
 /// requires - no memory pattern, one operator at a time - on the fastest card
 /// DirectX reports. Says whether the card took it: a card that refuses runs
@@ -885,10 +984,24 @@ pub fn with_card(builder: ort::session::builder::SessionBuilder, card: Option<On
 fn point_ort_at(runtime: &Path, card: Option<OnnxCard>) {
     unsafe { std::env::set_var("ORT_DYLIB_PATH", runtime) };
     let Some(directory) = runtime.parent() else { return };
-    let existing = std::env::var("PATH").unwrap_or_default();
-    unsafe { std::env::set_var("PATH", format!("{};{existing}", directory.display())) };
-    if card == Some(OnnxCard::DirectMl) {
-        preload(&directory.join("DirectML.dll"));
+    // On Linux the loader never consults PATH; the runtime directory joins
+    // LD_LIBRARY_PATH so bundled libraries resolve their own neighbours.
+    #[cfg(not(windows))]
+    {
+        // The card needs no preloading on Linux: CUDA resolves through the
+        // system loader, and DirectML does not exist here.
+        let _ = card;
+        let existing = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
+        unsafe { std::env::set_var("LD_LIBRARY_PATH", format!("{}:{existing}", directory.display())) };
+        return;
+    }
+    #[cfg(windows)]
+    {
+        let existing = std::env::var("PATH").unwrap_or_default();
+        unsafe { std::env::set_var("PATH", format!("{};{existing}", directory.display())) };
+        if card == Some(OnnxCard::DirectMl) {
+            preload(&directory.join("DirectML.dll"));
+        }
     }
 }
 
@@ -906,9 +1019,6 @@ fn preload(library: &Path) {
     }
 }
 
-#[cfg(not(windows))]
-fn preload(_library: &Path) {}
-
 /// Every Parakeet file, because the model is useless without all of them.
 pub const PARAKEET_ASSET_IDS: [&str; 5] =
     ["parakeet-tdt-int8", "parakeet-decoder", "parakeet-features", "parakeet-vocab", "parakeet-config"];
@@ -925,7 +1035,37 @@ pub const PARAKEET_FP32_ASSET_IDS: [&str; 6] = [
 ];
 
 pub fn asset(id: &str) -> Option<&'static Asset> {
-    ASSETS.iter().find(|asset| asset.id == id)
+    let found = ASSETS.iter().find(|asset| asset.id == id)?;
+    asset_available(found).then_some(found)
+}
+
+/// Whether an asset is offered on this machine at all. Windows-only runtimes
+/// stay in the table for the Windows build but are hidden on Linux: DirectML
+/// and its ONNX build, NVIDIA's Windows redistributables (on Linux the CUDA
+/// provider loads the system toolkit instead), and Whisper's standalone
+/// runtime with its models (Parakeet and OpenRouter cover karaoke there).
+/// Upstream ships no `linux-aarch64-gpu` build, so the CUDA runtime is hidden
+/// on ARM Linux too.
+pub fn asset_available(asset: &Asset) -> bool {
+    #[cfg(windows)]
+    {
+        let _ = asset;
+        return true;
+    }
+    #[cfg(not(windows))]
+    {
+        if asset.id.starts_with("whisper-") {
+            return false;
+        }
+        if matches!(asset.id, "onnxruntime-directml" | "directml" | "cuda-cublas" | "cuda-cudart" | "cuda-cufft" | "cuda-cudnn") {
+            return false;
+        }
+        #[cfg(target_arch = "aarch64")]
+        if asset.id == "onnxruntime-cuda" {
+            return false;
+        }
+        return true;
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1017,9 +1157,9 @@ impl LyricsSync {
     /// setting: the build for this machine's card when every file of it is
     /// there - it carries the processor provider too - else the processor build.
     pub fn machine_runtime(&self) -> Option<(PathBuf, Option<OnnxCard>)> {
-        let cuda = self.downloader.runtime_dir("onnx-cuda").join("onnxruntime.dll");
-        let directml = self.downloader.runtime_dir("onnx-dml").join("onnxruntime.dll");
-        let cpu = self.downloader.runtime_dir("onnx").join("onnxruntime.dll");
+        let cuda = self.downloader.runtime_dir("onnx-cuda").join(ONNXRUNTIME_LIBRARY);
+        let directml = self.downloader.runtime_dir("onnx-dml").join(ONNXRUNTIME_LIBRARY);
+        let cpu = self.downloader.runtime_dir("onnx").join(ONNXRUNTIME_LIBRARY);
         match OnnxFlavour::Auto.card() {
             Some(OnnxCard::Cuda) if self.has_cuda_libraries() => return Some((cuda, Some(OnnxCard::Cuda))),
             Some(OnnxCard::DirectMl) if self.has_directml_libraries() => return Some((directml, Some(OnnxCard::DirectMl))),
@@ -1067,17 +1207,27 @@ impl LyricsSync {
     }
 
     pub fn has_cuda_runtime(&self) -> bool {
-        self.downloader.runtime_dir("onnx-cuda").join("onnxruntime.dll").is_file()
+        self.downloader.runtime_dir("onnx-cuda").join(ONNXRUNTIME_LIBRARY).is_file()
     }
 
-    /// The CUDA provider is a separate library, and it in turn needs cuBLAS and
-    /// cuDNN beside it. Without all of them the provider refuses to load and the
-    /// run silently lands on the processor.
+    /// The CUDA provider is a separate library, and on Windows it in turn
+    /// needs cuBLAS, the CUDA runtime and cuDNN beside it. Without all of them
+    /// the provider refuses to load and the run silently lands on the
+    /// processor. On Linux those come from the system CUDA 12 toolkit and
+    /// cuDNN instead of a download, so presence is read off the loader.
     pub fn has_cuda_libraries(&self) -> bool {
         let dir = self.downloader.runtime_dir("onnx-cuda");
-        ["onnxruntime_providers_cuda.dll", "cublasLt64_12.dll", "cudart64_12.dll", "cudnn64_9.dll"]
-            .iter()
-            .all(|name| dir.join(name).is_file())
+        if !dir.join(ONNXRUNTIME_CUDA_PROVIDER).is_file() {
+            return false;
+        }
+        #[cfg(windows)]
+        {
+            ["cublasLt64_12.dll", "cudart64_12.dll", "cudnn64_9.dll"].iter().all(|name| dir.join(name).is_file())
+        }
+        #[cfg(not(windows))]
+        {
+            system_cuda_provider_libs()
+        }
     }
 
     /// A model counts as present only with every one of its files: a directory
@@ -1110,7 +1260,9 @@ impl LyricsSync {
             whisper_model: config.whisper_model.clone(),
             openrouter_model: config.openrouter_model.clone(),
             installed_models: self.installed_models().iter().map(|asset| asset.id.to_string()).collect(),
-            assets: self.downloader.status_of(ASSETS),
+            // Only what this machine can run: Windows-only runtimes are
+            // hidden on Linux rather than offered as broken downloads.
+            assets: self.downloader.status_of(&ASSETS.iter().copied().filter(asset_available).collect::<Vec<_>>()),
             active_download: self.downloader.active_for("karaoke").await,
         }
     }
@@ -2005,6 +2157,72 @@ Third");
         config.provider = AsrProvider::Whisper;
         assert!(config.available());
     }
+
+    /// Windows-only downloads are hidden on Linux rather than offered as
+    /// broken buttons: Whisper's standalone runtime with every one of its
+    /// models, the DirectML pair, and NVIDIA's Windows redistributables (the
+    /// CUDA provider reads the system toolkit there). Parakeet and both ONNX
+    /// builds stay, except the CUDA build on ARM, which upstream does not
+    /// publish for Linux.
+    #[test]
+    #[cfg(not(windows))]
+    fn windows_only_runtimes_are_hidden_on_linux() {
+        for id in [
+            "whisper-engine",
+            "whisper-cublas",
+            "whisper-cudnn",
+            "whisper-tiny",
+            "whisper-large-v3-turbo",
+            "onnxruntime-directml",
+            "directml",
+            "cuda-cublas",
+            "cuda-cudart",
+            "cuda-cufft",
+            "cuda-cudnn",
+        ] {
+            assert!(asset(id).is_none(), "{id} is offered on Linux");
+        }
+        for id in ["onnxruntime", "parakeet-tdt-int8", "parakeet-decoder", "parakeet-config"] {
+            assert!(asset(id).is_some(), "{id} is hidden on Linux");
+        }
+        #[cfg(target_arch = "x86_64")]
+        assert!(asset("onnxruntime-cuda").is_some());
+        #[cfg(target_arch = "aarch64")]
+        assert!(asset("onnxruntime-cuda").is_none());
+    }
+
+    /// The Linux runtime assets name tarballs holding the file the loader
+    /// binds, not the Windows zips.
+    #[test]
+    #[cfg(not(windows))]
+    fn linux_runtimes_are_tarballs_with_so_markers() {
+        let cpu = asset("onnxruntime").expect("the CPU runtime");
+        assert!(cpu.url.ends_with(".tgz"), "{}", cpu.url);
+        assert!(cpu.relative_path.ends_with(".tgz"), "{}", cpu.relative_path);
+        assert_eq!(cpu.marker, "libonnxruntime.so");
+        #[cfg(target_arch = "x86_64")]
+        {
+            let cuda = asset("onnxruntime-cuda").expect("the CUDA runtime");
+            assert!(cuda.url.ends_with(".tgz"), "{}", cuda.url);
+            assert_eq!(cuda.marker, "libonnxruntime_providers_cuda.so");
+        }
+    }
+
+    /// `ldconfig -p` lines (`name ... => path`) and versioned files beside
+    /// `LD_LIBRARY_PATH` entries both count; anything else does not.
+    #[test]
+    #[cfg(not(windows))]
+    fn the_loader_cache_and_the_library_path_are_both_read() {
+        let cache = "823 libs found.\n\tlibcublasLt.so.12 (libc6,x86-64) => /lib/x86_64-linux-gnu/libcublasLt.so.12\n\tlibz.so.1 (libc6,x86-64) => /lib/x86_64-linux-gnu/libz.so.1\n";
+        assert!(system_lib_present("libcublasLt.so", cache, &[]));
+        assert!(!system_lib_present("libcudnn.so", cache, &[]));
+        let dir = std::env::temp_dir().join(format!("ld-path-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("libcudnn.so.9.25.0"), b"x").unwrap();
+        assert!(system_lib_present("libcudnn.so", cache, &[dir.clone()]));
+        assert!(!system_lib_present("libcudart.so", cache, &[dir.clone()]));
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
 
 #[cfg(test)]
@@ -2108,7 +2326,7 @@ mod live_recognition {
 }
 
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 mod directml_live {
     use super::*;
     use std::time::Instant;

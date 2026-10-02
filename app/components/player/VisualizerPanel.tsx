@@ -1,7 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { isDesktop } from '../../services/externalLinks';
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { isDesktop, isLocalService } from '../../services/externalLinks';
 import { ChevronLeft, ChevronRight, ExternalLink, ListOrdered, Lock, LockOpen, Maximize2, Minimize2, Move, Shuffle, X } from 'lucide-react';
 import { useI18n } from '../../context/I18nContext';
 import { ensureAudioGraph, onAudioGraph, type AudioGraph } from '../../services/audioGraph';
@@ -43,11 +41,33 @@ export function setVisualizerPanelSize(size: { width: number; height: number }):
 
 /** Opens the visualiser in its own window. */
 export async function openVisualizerWindow(): Promise<void> {
-  // a browser has no second window of the studio: the visualiser stays in the page
+  // a plain browser has no Tauri webview window, but a same-origin popup
+  // shares the localStorage state and the BroadcastChannel feed, so it is a
+  // real second window; the desktop shell keeps its own window instead
   if (!isDesktop()) {
-    setVisualizer({ place: 'panel' });
+    if (!isLocalService()) {
+      setVisualizer({ place: 'panel' });
+      return;
+    }
+    const popup = window.open('visualizer.html', 'yue2-visualizer', 'width=960,height=540');
+    if (!popup) {
+      setVisualizer({ place: 'panel' });
+      return;
+    }
+    setVisualizer({ place: 'window' });
+    // the popup's own page reports its end, but a killed popup says nothing:
+    // poll its handle instead of leaving the state pointing at a dead window
+    const watch = window.setInterval(() => {
+      if (popup.closed) {
+        window.clearInterval(watch);
+        if (visualizer().place === 'window') setVisualizer({ place: 'closed', fullscreen: false });
+      }
+    }, 500);
     return;
   }
+  // Tauri-only from here: loaded lazily so a plain browser never fetches them
+  const { invoke } = await import('@tauri-apps/api/core');
+  const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
   const already = await WebviewWindow.getByLabel('visualizer');
   await invoke('open_visualizer_window');
   setVisualizer({ place: 'window' });

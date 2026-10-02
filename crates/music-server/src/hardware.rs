@@ -92,9 +92,14 @@ fn probe() -> &'static Hardware {
         let total_ram_gb = system.total_memory() as f64 / 1_000_000_000.0;
         let (gpu_name, total_vram_gb, nvidia) = match nvidia_smi() {
             Some((name, vram)) => (Some(name), vram, true),
-            None => match display_adapter() {
-                Some((name, vram)) => (Some(name), vram, false),
-                None => (None, 0.0, false),
+            // Unified-memory cards (e.g. GB10) answer nvidia-smi but report
+            // no VRAM figure: still an NVIDIA card, with unknown memory.
+            None => match nvidia_name() {
+                Some(name) => (Some(name), 0.0, true),
+                None => match display_adapter() {
+                    Some((name, vram)) => (Some(name), vram, false),
+                    None => (None, 0.0, false),
+                },
             },
         };
         let device = if nvidia { nvidia_cuda_device() } else { None };
@@ -189,6 +194,18 @@ fn nvidia_smi() -> Option<(String, f64)> {
     Some((name.trim().into(), memory.trim().parse::<f64>().ok()? / 1024.0))
 }
 
+/// The card's name when its memory figure is unavailable: unified-memory
+/// NVIDIA cards report `[N/A]` for `memory.total`, which fails the parse
+/// above, but they still answer to their name.
+fn nvidia_name() -> Option<String> {
+    let output = quiet("nvidia-smi").args(chosen_card()).args(["--query-gpu=name", "--format=csv,noheader"]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&output.stdout).lines().next()?.trim().to_owned();
+    (!name.is_empty()).then_some(name)
+}
+
 /// Asked apart from the name and memory: a driver too old to know
 /// `compute_cap` fails the whole query, and such a driver runs neither build.
 fn nvidia_cuda_device() -> Option<((u32, u32), u32)> {
@@ -223,7 +240,57 @@ fn display_adapter() -> Option<(String, f64)> {
 
 #[cfg(not(windows))]
 fn display_adapter() -> Option<(String, f64)> {
-    None
+    linux_display_adapter()
+}
+
+/// A display adapter on Linux, without the Windows registry: a DRM render
+/// node (`/dev/dri/renderD*`) means a card Vulkan can reach, and its sysfs
+/// entry names the vendor. VRAM size is reported as unknown (0 GB) — NVIDIA
+/// cards never come through here (`nvidia-smi` answers first), and portable
+/// VRAM accounting for AMD/Intel needs per-driver hwmon reads. The name being
+/// present is what offers the Vulkan device chain; the tiers stay CPU-safe.
+#[cfg(not(windows))]
+fn linux_display_adapter() -> Option<(String, f64)> {
+    let drm = std::path::Path::new("/sys/class/drm");
+    let entries = std::fs::read_dir(drm).ok()?;
+    let mut names = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !(name.starts_with("renderD") || name.starts_with("card")) {
+            continue;
+        }
+        let device = entry.path().join("device");
+        let vendor = std::fs::read_to_string(device.join("vendor")).unwrap_or_default();
+        let vendor = vendor.trim().trim_start_matches("0x").to_ascii_lowercase();
+        let label = match linux_vendor_name(&vendor) {
+            Some(label) => label,
+            None => continue,
+        };
+        names.push(label.to_string());
+    }
+    names.sort();
+    names.dedup();
+    // An NVIDIA card reached here only when nvidia-smi failed; still a card.
+    if names.is_empty() && std::path::Path::new("/dev/dri").is_dir() {
+        let nodes = std::fs::read_dir("/dev/dri").ok()?;
+        let has_render = nodes.flatten().any(|entry| entry.file_name().to_string_lossy().starts_with("renderD"));
+        if has_render {
+            return Some(("GPU".into(), 0.0));
+        }
+        return None;
+    }
+    names.into_iter().next().map(|name| (name, 0.0))
+}
+
+/// sysfs `vendor` (hex, `0x` stripped, lowercased) to the card family Vulkan reaches.
+#[cfg(not(windows))]
+fn linux_vendor_name(vendor: &str) -> Option<&'static str> {
+    match vendor {
+        "10de" => Some("NVIDIA GPU"),
+        "1002" => Some("AMD GPU"),
+        "8086" => Some("Intel GPU"),
+        _ => None,
+    }
 }
 
 /// Joins `reg query /s` listings of the adapter names and memory sizes by
@@ -282,6 +349,8 @@ mod tests {
         // GTX 1660 Super on a current driver: device code from CUDA 13.
         assert_eq!(cuda_build((7, 5), 581), Some(CudaBuild::Cuda13));
         assert_eq!(cuda_build((12, 0), 590), Some(CudaBuild::Cuda13));
+        // Blackwell GB10 (unified memory, driver reports 12.1): CUDA 13.
+        assert_eq!(cuda_build((12, 1), 580), Some(CudaBuild::Cuda13));
         // Pascal and Maxwell, which CUDA 13 dropped, on any driver.
         assert_eq!(cuda_build((6, 1), 581), Some(CudaBuild::Cuda12));
         assert_eq!(cuda_build((5, 2), 560), Some(CudaBuild::Cuda12));
@@ -302,8 +371,16 @@ mod tests {
     }
 
     #[test]
-    fn the_adapter_with_the_most_memory_wins_and_basic_display_never_does() {
-        let names = "\r\nHKEY_LOCAL_MACHINE\\X\\0000\r\n    DriverDesc    REG_SZ    AMD Radeon RX 7800 XT\r\n\r\nHKEY_LOCAL_MACHINE\\X\\0001\r\n    DriverDesc    REG_SZ    Intel(R) UHD Graphics 770\r\n\r\nHKEY_LOCAL_MACHINE\\X\\0002\r\n    DriverDesc    REG_SZ    Microsoft Basic Display Adapter\r\n";
+    #[cfg(not(windows))]
+    fn linux_vendor_ids_name_their_card_family() {
+        assert_eq!(linux_vendor_name("10de"), Some("NVIDIA GPU"));
+        assert_eq!(linux_vendor_name("1002"), Some("AMD GPU"));
+        assert_eq!(linux_vendor_name("8086"), Some("Intel GPU"));
+        assert_eq!(linux_vendor_name("1234"), None);
+    }
+
+    #[test]
+    fn the_adapter_with_the_most_memory_wins_and_basic_display_never_does() {        let names = "\r\nHKEY_LOCAL_MACHINE\\X\\0000\r\n    DriverDesc    REG_SZ    AMD Radeon RX 7800 XT\r\n\r\nHKEY_LOCAL_MACHINE\\X\\0001\r\n    DriverDesc    REG_SZ    Intel(R) UHD Graphics 770\r\n\r\nHKEY_LOCAL_MACHINE\\X\\0002\r\n    DriverDesc    REG_SZ    Microsoft Basic Display Adapter\r\n";
         let sizes = "\r\nHKEY_LOCAL_MACHINE\\X\\0000\r\n    HardwareInformation.qwMemorySize    REG_QWORD    0x400000000\r\n\r\nHKEY_LOCAL_MACHINE\\X\\0001\r\n    HardwareInformation.qwMemorySize    REG_QWORD    0x80000000\r\n\r\nHKEY_LOCAL_MACHINE\\X\\0002\r\n    HardwareInformation.qwMemorySize    REG_QWORD    0x800000000\r\n";
         let (name, vram) = best_adapter(names, sizes).unwrap();
         assert_eq!(name, "AMD Radeon RX 7800 XT");

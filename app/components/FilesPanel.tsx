@@ -1,14 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, FolderDown, FolderOpen, Loader2, Minimize2, Move, X } from 'lucide-react';
+import { Check, FolderDown, FolderOpen, Loader2, Minimize2, Move, Play, X } from 'lucide-react';
 import { useI18n } from '../context/I18nContext';
-import { onSaving, revealSaved, type SavingFile } from '../services/saveFile';
+import { onSaving, playSaved, revealSaved, type SavingFile } from '../services/saveFile';
+import { isLocalService } from '../services/externalLinks';
 import { dockSlot, useFloatable } from '../services/useFloatable';
 
 /**
  * The files saved this session, from Dub Studio's files panel: a chip in the
  * sidebar, or a panel dragged anywhere over the window. Each save shows its
- * progress while it is written and a way to it in Explorer once it is.
+ * progress while it is written and a way to it in the file manager once it is.
  */
 
 const size = (bytes?: number | null) => {
@@ -104,13 +105,25 @@ export const FilesPanel: React.FC = () => {
                 )}
                 {file.path && <div className="mt-1 truncate text-[10px] text-zinc-500" title={file.path}>{file.path}</div>}
                 {file.state === 'done' && file.path && (
-                  <button
-                    type="button"
-                    onClick={() => void revealSaved(file.path as string)}
-                    className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-zinc-300 px-2.5 py-1 text-[12px] text-zinc-600 hover:border-pink-400 hover:text-pink-600 dark:border-white/15 dark:text-zinc-300"
-                  >
-                    <FolderOpen size={13} /> {t('filesShowInFolder')}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void revealSaved(file.path as string)}
+                      className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-zinc-300 px-2.5 py-1 text-[12px] text-zinc-600 hover:border-pink-400 hover:text-pink-600 dark:border-white/15 dark:text-zinc-300"
+                    >
+                      <FolderOpen size={13} /> {t('filesShowInFolder')}
+                    </button>
+                    {isLocalService() && (
+                      <button
+                        type="button"
+                        onClick={() => void playSaved(file.path as string)}
+                        title={t('playExternallyHint')}
+                        className="ml-2 mt-2 inline-flex items-center gap-1.5 rounded-md border border-zinc-300 px-2.5 py-1 text-[12px] text-zinc-600 hover:border-pink-400 hover:text-pink-600 dark:border-white/15 dark:text-zinc-300"
+                      >
+                        <Play size={13} /> {t('playExternally')}
+                      </button>
+                    )}
+                  </>
                 )}
                 {file.state === 'error' && file.error && <div className="mt-1 wrap-break-word text-[11px] text-rose-600 dark:text-rose-300">{file.error}</div>}
               </div>

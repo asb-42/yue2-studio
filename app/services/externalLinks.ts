@@ -11,6 +11,8 @@
  * the ones inside news items, so nothing has to remember to be special.
  */
 
+import { API_BASE } from './apiBase';
+
 type Opener = { openUrl?: (url: string) => Promise<void> };
 type Invoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -21,6 +23,24 @@ function bridge(): { opener?: Opener; core?: { invoke?: Invoke } } | null {
 /** True inside the desktop shell. */
 export function isDesktop(): boolean {
   return Boolean(bridge());
+}
+
+/**
+ * True when the studio service runs on this computer: the desktop shell, a
+ * loopback API base, or a same-origin page on localhost. Only then do
+ * "show in folder / play in VLC" make sense — anywhere else they would act
+ * on the studio's computer, not the viewer's.
+ */
+export function isLocalService(): boolean {
+  if (isDesktop()) return true;
+  if (typeof location === 'undefined') return false;
+  let host: string;
+  try {
+    host = API_BASE ? new URL(API_BASE).hostname : location.hostname;
+  } catch {
+    return false;
+  }
+  return host === '' || host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
 }
 
 /** Opens one URL wherever it belongs. */

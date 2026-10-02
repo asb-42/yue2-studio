@@ -782,6 +782,7 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/files/save", post(saving::choose))
         .route("/v1/files/save/{id}", post(saving::write).layer(DefaultBodyLimit::disable()))
         .route("/v1/files/reveal", post(saving::reveal))
+        .route("/v1/files/play", post(saving::play))
         .route("/v1/skins", get(skins::list).post(skins::add).layer(DefaultBodyLimit::max(skins::LIMIT)))
         .route("/v1/skins/file/{name}", get(skins::file))
         .route("/v1/network/proxy", get(read_proxy).put(update_proxy))
@@ -885,6 +886,7 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/training/runs/{id}/checkpoints/{step}/install", post(install_training_checkpoint))
         .route("/v1/library/songs/{id}/stems", get(read_stems).post(start_separation))
         .route("/v1/library/songs/{id}/stems/{stem}", get(read_stem_audio))
+        .route("/v1/library/songs/{id}/play-external", post(play_song_externally))
         .route("/v1/library/songs/{id}/cover/auto", post(draw_cover_now))
         .route("/v1/activity", get(read_activity))
         .route("/v1/cover-templates", get(read_cover_templates).put(write_cover_templates))
@@ -1276,50 +1278,61 @@ fn stems_on_disk(state: &AppState, song_id: &str) -> Vec<String> {
 /// page lists all three the same way.
 async fn separation_assets(State(state): State<AppState>) -> Json<Value> {
     let runtime_installed = state.lyrics_sync.onnxruntime_library().is_some();
-    let assets = serde_json::json!([
-        {
+    #[cfg(windows)]
+    let cuda_dir = state.lyrics_sync.downloader().runtime_dir("onnx-cuda");
+    let mut assets = vec![serde_json::json!({
             "id": separation::MODEL.id,
             "label": separation::MODEL.label,
             "bytes": separation::MODEL.bytes,
             "note": separation::MODEL.note,
             "installed": state.separator.is_installed(),
-        },
-        {
-            "id": "onnxruntime-cuda",
-            "label": "ONNX Runtime 1.30.0 · CUDA",
-            "bytes": 379_723_801u64,
+        })];
+    // The CUDA runtime from the catalogue where it exists (hidden on ARM
+    // Linux, which upstream ships no GPU build for).
+    if let Some(cuda) = lyrics_sync::asset("onnxruntime-cuda") {
+        assets.push(serde_json::json!({
+            "id": cuda.id,
+            "label": cuda.label,
+            "bytes": cuda.bytes,
             "note": "The CUDA build of the runtime.",
             "installed": state.lyrics_sync.has_cuda_runtime(),
-        },
-        {
-            "id": "cuda-cublas",
-            "label": "NVIDIA cuBLAS 12.9",
-            "bytes": 549_731_131u64,
-            "note": "The linear algebra the CUDA provider is built on.",
-            "installed": state.lyrics_sync.downloader().runtime_dir("onnx-cuda").join("cublasLt64_12.dll").is_file(),
-        },
-        {
-            "id": "cuda-cudart",
-            "label": "NVIDIA CUDA runtime 12.9",
-            "bytes": 3_521_238u64,
-            "note": "The CUDA runtime itself.",
-            "installed": state.lyrics_sync.downloader().runtime_dir("onnx-cuda").join("cudart64_12.dll").is_file(),
-        },
-        {
-            "id": "cuda-cudnn",
-            "label": "NVIDIA cuDNN 9.25",
-            "bytes": 1_904_452_100u64,
-            "note": "The convolution kernels the separator spends its time in.",
-            "installed": state.lyrics_sync.downloader().runtime_dir("onnx-cuda").join("cudnn64_9.dll").is_file(),
-        },
-        {
-            "id": "onnxruntime",
-            "label": "ONNX Runtime 1.30.0",
-            "bytes": 82_645_522,
+        }));
+    }
+    // The CUDA provider's companions: downloads on Windows, the system
+    // toolkit on Linux (see lyrics_sync::has_cuda_libraries).
+    #[cfg(windows)]
+    for (id, label, bytes, note, file) in [
+        ("cuda-cublas", "NVIDIA cuBLAS 12.9", 549_731_131u64, "The linear algebra the CUDA provider is built on.", "cublasLt64_12.dll"),
+        ("cuda-cudart", "NVIDIA CUDA runtime 12.9", 3_521_238u64, "The CUDA runtime itself.", "cudart64_12.dll"),
+        ("cuda-cudnn", "NVIDIA cuDNN 9.25", 1_904_452_100u64, "The convolution kernels the separator spends its time in.", "cudnn64_9.dll"),
+    ] {
+        assets.push(serde_json::json!({
+            "id": id,
+            "label": label,
+            "bytes": bytes,
+            "note": note,
+            "installed": cuda_dir.join(file).is_file(),
+        }));
+    }
+    // Display-only: nothing to download, so the panel never offers it.
+    #[cfg(not(windows))]
+    assets.push(serde_json::json!({
+        "id": "system-cuda",
+        "label": "NVIDIA CUDA 12 toolkit + cuDNN 9 (system)",
+        "bytes": 0,
+        "note": "The CUDA provider loads the system toolkit, not a download: install CUDA 12 and cuDNN 9 from NVIDIA (apt, dnf, or /usr/local/cuda) for GPU separation.",
+        "installed": lyrics_sync::system_cuda_libraries_present(),
+    }));
+    if let Some(cpu) = lyrics_sync::asset("onnxruntime") {
+        assets.push(serde_json::json!({
+            "id": cpu.id,
+            "label": cpu.label,
+            "bytes": cpu.bytes,
             "note": "Runs the separator and the karaoke recogniser; shared between them.",
             "installed": runtime_installed,
-        }
-    ]);
+        }));
+    }
+    let assets = serde_json::Value::Array(assets);
     let config = state.separation_config.read().await.clone();
     let mut set: Vec<&'static lyrics_sync::Asset> = Vec::new();
     if let Some(asset) = lyrics_sync::asset("onnxruntime") { set.push(asset); }
@@ -2149,6 +2162,9 @@ async fn read_training(State(state): State<AppState>) -> Json<Value> {
 async fn training_pack_files(state: &AppState) -> (Vec<Value>, bool) {
     let separator_ready = vocal_separator(state).await.is_some();
     let mut pack = state.training.pack_status();
+    // The trainer's cuBLAS row is a Windows download: on Linux the trainer
+    // uses the system CUDA toolkit, like the engine.
+    #[cfg(windows)]
     if trainer_card_refusal().is_none() {
         let cublas = engine_runtime::cublas_asset(hardware::CudaBuild::Cuda13);
         pack.push(serde_json::json!({
@@ -2680,8 +2696,24 @@ async fn install_training_checkpoint(
     Ok(Json(meta))
 }
 
-async fn read_stems(State(state): State<AppState>, Path(id): Path<String>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
-    let songs = state.library.list_songs().map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+/// A library track, opened in the studio computer's native media player
+/// (VLC, mpv, ...) instead of the browser: the Linux replacement for the
+/// desktop shell's Winamp mode and Explorer verbs. The path is resolved
+/// inside the library's own media folder, never from the request.
+async fn play_song_externally(State(state): State<AppState>, Path(id): Path<String>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let song = state
+        .library
+        .get_song(&id)
+        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Song not found".into()))?;
+    let path = state.library.media_path_for_song(&song).ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Song audio is not available in the studio media library".into()))?;
+    match saving::open_in_player(&path) {
+        Ok(player) => Ok(Json(serde_json::json!({ "player": player, "song_id": id, "path": path.display().to_string() }))),
+        Err(error) => Err(api_error(StatusCode::INTERNAL_SERVER_ERROR, error)),
+    }
+}
+
+async fn read_stems(State(state): State<AppState>, Path(id): Path<String>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {    let songs = state.library.list_songs().map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     let in_library: Vec<Value> = songs
         .iter()
         .filter(|song| derived_from(song) == Some((id.as_str(), "stems")))
@@ -4494,7 +4526,12 @@ async fn compose_setup_status(state: &AppState, manager_status: model_manager::M
         // minutes. A spinner that says nothing for ten minutes is the same
         // screen as a spinner that is stuck.
         let runtime_cuda = state.engine_options.read().await.cuda_build();
+        // Windows reports the downloadable cuBLAS bytes; on Linux there is no
+        // runtime download (system CUDA toolkit), so nothing to total.
+        #[cfg(windows)]
         let runtime_total = runtime_cuda.map(|build| engine_runtime::cublas_asset(build).bytes).unwrap_or(0);
+        #[cfg(not(windows))]
+        let runtime_total = 0_u64;
         let runtime_active = state.engine_runtime.downloader().active().await;
         fields.insert(
             "engine_runtime".into(),
@@ -5026,25 +5063,35 @@ fn karaoke_set(name: &str, device: lyrics_sync::OnnxFlavour, whisper_model: Opti
             }
         }
         "whisper" => {
-            // One binary whichever device is chosen; the card needs CUDA 11's
-            // libraries beside it, and without them CTranslate2 silently uses
-            // the processor instead of saying so.
-            wanted.push("whisper-engine".into());
-            if device.uses_cuda() {
-                wanted.push("whisper-cublas".into());
-                wanted.push("whisper-cudnn".into());
+            // Linux has no Whisper standalone runtime (its three downloads
+            // are Windows builds); the install endpoint says so outright.
+            // Keeping the set empty here is the second lock on that door.
+            #[cfg(windows)]
+            {
+                // One binary whichever device is chosen; the card needs CUDA 11's
+                // libraries beside it, and without them CTranslate2 silently uses
+                // the processor instead of saying so.
+                wanted.push("whisper-engine".into());
+                if device.uses_cuda() {
+                    wanted.push("whisper-cublas".into());
+                    wanted.push("whisper-cudnn".into());
+                }
+                // A model is a directory of files, and it is useless one file
+                // short, so the whole set goes together.
+                let chosen = whisper_model.unwrap_or("whisper-large-v3-turbo");
+                if let Some(size) = chosen.strip_prefix("whisper-") {
+                    let prefix = format!("models/whisper/faster-whisper-{size}/");
+                    wanted.extend(
+                        lyrics_sync::ASSETS
+                            .iter()
+                            .filter(|asset| asset.relative_path.starts_with(&prefix))
+                            .map(|asset| asset.id.to_string()),
+                    );
+                }
             }
-            // A model is a directory of files, and it is useless one file
-            // short, so the whole set goes together.
-            let chosen = whisper_model.unwrap_or("whisper-large-v3-turbo");
-            if let Some(size) = chosen.strip_prefix("whisper-") {
-                let prefix = format!("models/whisper/faster-whisper-{size}/");
-                wanted.extend(
-                    lyrics_sync::ASSETS
-                        .iter()
-                        .filter(|asset| asset.relative_path.starts_with(&prefix))
-                        .map(|asset| asset.id.to_string()),
-                );
+            #[cfg(not(windows))]
+            {
+                let _ = (device, whisper_model);
             }
         }
         _ => {}
@@ -5056,6 +5103,15 @@ async fn karaoke_install(
     State(state): State<AppState>,
     Json(request): Json<AssistantAssetRequest>,
 ) -> Result<Json<lyrics_sync::SyncStatus>, (StatusCode, Json<ApiError>)> {
+    // Whisper's standalone runtime ships Windows builds only; offering the
+    // download on Linux would fetch gigabytes nobody can run. Parakeet and
+    // OpenRouter cover karaoke there.
+    if cfg!(not(windows)) && request.asset_id == "whisper" {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "Whisper is not available on Linux: use Parakeet, or an OpenRouter speech-to-text model".into(),
+        ));
+    }
     let config = state.lyrics_sync_config.read().await.clone();
     let set = karaoke_set(
         &request.asset_id,
@@ -6325,11 +6381,20 @@ async fn setup_adopt(State(state): State<AppState>, body: axum::body::Bytes) -> 
     let named = serde_json::from_slice::<Value>(&body).ok().and_then(|value| value.get("path").and_then(Value::as_str).map(std::path::PathBuf::from));
     let picked = match named {
         Some(folder) => Some(folder),
+        #[cfg(windows)]
         None => tokio::task::spawn_blocking(move || {
             rfd::FileDialog::new().set_title("Folder with YuE2 models").pick_folder()
         })
         .await
         .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?,
+        // No GUI dialog on Linux/server builds: the caller names the folder.
+        #[cfg(not(windows))]
+        None => {
+            return Err(api_error(
+                StatusCode::BAD_REQUEST,
+                "pass the folder as {\"path\": \"...\"}; this build has no folder picker".into(),
+            ));
+        }
     };
 
     let Some(folder) = picked else {

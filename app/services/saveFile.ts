@@ -4,7 +4,7 @@ import { isDesktop } from './externalLinks';
 /**
  * "Save as" for anything the window hands the user.
  *
- * Windows' own Save dialog asks where, starting in the folder chosen last; the
+ * The system's Save dialog asks where, starting in the folder chosen last; the
  * service then writes the file - one it serves, read from its own address, or
  * bytes the window made - and reports how far it has got. The files panel
  * shows each save from those reports.
@@ -78,7 +78,17 @@ export async function saveFile(name: string, source: SaveSource): Promise<void> 
   }
 }
 
-/** Explorer, open on a saved file. */
+/** A saved file, opened in the studio computer's native media player (VLC, mpv, ...). Returns the player it opened in. */
+export async function playSaved(path: string): Promise<string> {
+  const body = await answer(await fetch(apiUrl('/v1/files/play'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  }));
+  return String(body.player ?? '');
+}
+
+/** The file manager, open on a saved file. */
 export async function revealSaved(path: string): Promise<void> {
   await answer(await fetch(apiUrl('/v1/files/reveal'), {
     method: 'POST',

@@ -1,7 +1,7 @@
 import './src-styles.css';
 import React, { useCallback, useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { isDesktop } from './services/externalLinks';
 import { I18nProvider, useI18n } from './context/I18nContext';
 import { receiveVisualizerFeed, type ReceivedFeed } from './services/visualizerFeed';
 import { VisualizerView } from './components/player/VisualizerView';
@@ -47,21 +47,43 @@ const Window: React.FC = () => {
 
   // the window follows the shared state: fullscreen, and closing when it is put elsewhere
   useEffect(() => {
-    const current = getCurrentWindow();
-    let shown = visualizer().place === 'window';
-    const unsubscribe = onVisualizer((state) => {
-      if (state.place === 'window') shown = true;
-      else if (shown) void current.close();
-      void current.isFullscreen().then((now) => {
-        if (now !== state.fullscreen) void current.setFullscreen(state.fullscreen);
+    // a plain browser popup has no Tauri window: fullscreen follows the
+    // document there, and closing is the window itself
+    if (!isDesktop()) {
+      const unsubscribe = onVisualizer((state) => {
+        if (state.place !== 'window') window.close();
+        else if (state.fullscreen && !document.fullscreenElement) void document.documentElement.requestFullscreen().catch(() => undefined);
+        else if (!state.fullscreen && document.fullscreenElement) void document.exitFullscreen();
       });
-    });
+      const bye = () => {
+        if (visualizer().place === 'window') setVisualizer({ place: 'closed', fullscreen: false });
+      };
+      window.addEventListener('beforeunload', bye);
+      return () => {
+        unsubscribe();
+        window.removeEventListener('beforeunload', bye);
+      };
+    }
+    // the desktop shell's own window, reached lazily so a browser never loads it
+    let current: { close: () => Promise<void>; isFullscreen: () => Promise<boolean>; setFullscreen: (on: boolean) => Promise<void> } | null = null;
+    let unsubscribe: (() => void) | null = null;
     const bye = () => {
       if (visualizer().place === 'window') setVisualizer({ place: 'closed', fullscreen: false });
     };
+    void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+      current = getCurrentWindow();
+      let shown = visualizer().place === 'window';
+      unsubscribe = onVisualizer((state) => {
+        if (state.place === 'window') shown = true;
+        else if (shown) void current?.close();
+        void current?.isFullscreen().then((now) => {
+          if (now !== state.fullscreen) void current?.setFullscreen(state.fullscreen);
+        });
+      });
+    });
     window.addEventListener('beforeunload', bye);
     return () => {
-      unsubscribe();
+      unsubscribe?.();
       window.removeEventListener('beforeunload', bye);
     };
   }, []);

@@ -16,31 +16,54 @@
 //! Toolkit ran the release.
 
 use std::path::Path;
-#[cfg(test)]
+#[cfg(all(test, windows))]
 use std::path::PathBuf;
 
 use anyhow::{bail, Result};
-#[cfg(test)]
+#[cfg(all(test, windows))]
 use anyhow::Context;
 
-use crate::downloads::{Asset, AssetKind, Downloader};
+use crate::downloads::{Asset, Downloader};
+#[cfg(windows)]
+use crate::downloads::AssetKind;
 use crate::hardware::CudaBuild;
 
-/// The libraries of each build, by file name, exactly as its ggml-cuda.dll
+/// The libraries of each build, by file name, exactly as its CUDA backend
 /// imports them. The CUDA major is part of the name, so a rebuild on another
 /// major is a change here, and the dependency check below catches it.
+#[cfg(windows)]
 pub const CUDA13_LIBRARIES: [&str; 2] = ["cublas64_13.dll", "cublasLt64_13.dll"];
+#[cfg(windows)]
 pub const CUDA12_LIBRARIES: [&str; 2] = ["cublas64_12.dll", "cublasLt64_12.dll"];
+/// The SONAMEs the Linux engine's `libggml-cuda.so` loads from the system
+/// CUDA toolkit: no major-less `libcublas.so` is resolved at run time.
+///
+/// Referenced by the Linux bundle test (the Linux supervisor resolves these
+/// through the system loader and downloads nothing); the future `ldd`-based
+/// bundle check will use them too.
+#[cfg(not(windows))]
+#[allow(dead_code)]
+pub const CUDA13_LIBRARIES: [&str; 2] = ["libcublas.so.13", "libcublasLt.so.13"];
+/// The SONAMEs of the Linux CUDA 12 backend (Maxwell–Volta, older drivers).
+/// See `CUDA13_LIBRARIES` above for why this allows dead code.
+#[cfg(not(windows))]
+#[allow(dead_code)]
+pub const CUDA12_LIBRARIES: [&str; 2] = ["libcublas.so.12", "libcublasLt.so.12"];
 
 /// The Visual C++ runtime the engine and ggml are compiled against, by the
-/// names in their import tables.
+/// names in their import tables. Windows-only: a Linux engine links the
+/// system libstdc++/libgomp instead.
+#[cfg(windows)]
 pub const VC_RUNTIME_LIBRARIES: [&str; 4] =
     ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "vcomp140.dll"];
+#[cfg(not(windows))]
+pub const VC_RUNTIME_LIBRARIES: [&str; 0] = [];
 
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 pub const ASSETS: &[Asset] = &[CUBLAS13, CUBLAS12];
 
+#[cfg(windows)]
 const CUBLAS13: Asset = Asset {
     id: "engine-cuda-cublas",
     label: "NVIDIA cuBLAS 13.5",
@@ -62,9 +85,9 @@ const CUBLAS13: Asset = Asset {
     note: "The linear algebra the engine's CUDA backend is linked against. Without it the engine cannot start at all.",
 };
 
+#[cfg(windows)]
 const CUBLAS12: Asset = Asset {
-    id: "engine-cuda12-cublas",
-    label: "NVIDIA cuBLAS 12.9",
+    id: "engine-cuda12-cublas",    label: "NVIDIA cuBLAS 12.9",
     kind: AssetKind::Runtime,
     // The cuBLAS of the CUDA 12.9 toolkit the CUDA 12 backend is built with.
     // Size from redist/redistrib_12.9.1.json, confirmed by a HEAD request.
@@ -78,7 +101,9 @@ const CUBLAS12: Asset = Asset {
     note: "The linear algebra of the engine's CUDA 12 backend, for cards CUDA 13 dropped and older drivers.",
 };
 
-/// The cuBLAS a CUDA build loads.
+/// The cuBLAS a CUDA build loads. Windows-only: on Linux the engine uses the
+/// system CUDA toolkit and nothing is downloaded (see `missing`).
+#[cfg(windows)]
 pub fn cublas_asset(build: CudaBuild) -> &'static Asset {
     match build {
         CudaBuild::Cuda13 => &CUBLAS13,
@@ -103,7 +128,8 @@ impl EngineRuntime {
     }
 
     /// Where the libraries live once installed - beside the engine.
-    #[cfg(test)]
+    /// Windows-only for now: the Linux `ldd` bundle check will use it too.
+    #[cfg(all(test, windows))]
     pub fn library_dir(&self) -> PathBuf {
         self.downloader.root().to_path_buf()
     }
@@ -136,13 +162,26 @@ impl EngineRuntime {
     /// A machine that already has the libraries on its search path - a CUDA
     /// Toolkit installation - downloads nothing: the engine inherits that path
     /// and finds them there.
+    ///
+    /// On Linux nothing is ever downloaded: the engine loads cuBLAS from the
+    /// system CUDA toolkit (`LD_LIBRARY_PATH`/`ldconfig`), and a machine
+    /// without it simply fails the CUDA backend load, which Auto treats like
+    /// any other device failure and moves on to Vulkan or the processor.
     pub fn missing(&self, cuda: Option<CudaBuild>) -> Vec<&'static Asset> {
-        let Some(build) = cuda else { return Vec::new() };
-        let asset = cublas_asset(build);
-        if self.downloader.is_installed(asset) || asset.pick.iter().all(|library| is_on_the_search_path(library)) {
+        #[cfg(not(windows))]
+        {
+            let _ = cuda;
             return Vec::new();
         }
-        vec![asset]
+        #[cfg(windows)]
+        {
+            let Some(build) = cuda else { return Vec::new() };
+            let asset = cublas_asset(build);
+            if self.downloader.is_installed(asset) || asset.pick.iter().all(|library| is_on_the_search_path(library)) {
+                return Vec::new();
+            }
+            vec![asset]
+        }
     }
 
     /// Fetches whatever is missing and waits for it.
@@ -173,7 +212,9 @@ fn is_on_the_search_path(library: &str) -> bool {
 /// version is part of the file name - `cublas64_13.dll`, not `cublas.dll`.
 /// Reading it here means the release can check itself instead of trusting
 /// that whoever built it remembered.
-#[cfg(test)]
+///
+/// Windows-only: the Linux bundle check will read ELF dependencies instead.
+#[cfg(all(test, windows))]
 pub fn imported_libraries(binary: &Path) -> Result<Vec<String>> {
     let data = std::fs::read(binary)?;
     let at = |offset: usize| -> Result<u32> {
@@ -230,7 +271,9 @@ pub fn imported_libraries(binary: &Path) -> Result<Vec<String>> {
 
 /// Libraries every Windows machine has, or that arrive with the display
 /// driver. Everything else has to be shipped or downloaded.
-#[cfg(test)]
+///
+/// Windows-only with the rest of the PE check.
+#[cfg(all(test, windows))]
 fn is_provided_by_the_system(name: &str) -> bool {
     let name = name.to_ascii_lowercase();
     name.starts_with("api-ms-win-")
@@ -271,7 +314,9 @@ fn is_provided_by_the_system(name: &str) -> bool {
 /// `ggml-cuda.dll`, which is where cuBLAS actually comes in. Checking only the
 /// executable's own imports would have found nothing wrong with the release
 /// that could not start.
-#[cfg(test)]
+///
+/// Windows-only with the rest of the PE check.
+#[cfg(all(test, windows))]
 pub fn unresolved_dependencies(directory: &Path, entry_point: &str) -> Result<Vec<String>> {
     let mut seen: Vec<String> = Vec::new();
     let mut queue = vec![entry_point.to_string()];
@@ -304,6 +349,7 @@ mod tests {
     /// the import table asks the loader for, and what `pick` takes out of the
     /// archive. A typo here is a download that finishes and changes nothing.
     #[test]
+    #[cfg(windows)]
     fn every_imported_library_is_picked_out_of_the_archive() {
         for (build, libraries, major) in
             [(CudaBuild::Cuda13, CUDA13_LIBRARIES, "13"), (CudaBuild::Cuda12, CUDA12_LIBRARIES, "12")]
@@ -319,6 +365,7 @@ mod tests {
 
     /// A runtime asset that unpacks nowhere would download and vanish.
     #[test]
+    #[cfg(windows)]
     fn the_libraries_land_in_one_directory_the_engine_can_be_pointed_at() {
         for asset in ASSETS {
             // Straight into the bundle: a sub-directory would put them
@@ -394,6 +441,7 @@ mod tests {
     /// which is the point of the PATH check, and would make the test lie about
     /// what it proved.
     #[test]
+    #[cfg(windows)]
     fn the_libraries_count_as_installed_only_beside_the_engine() {
         let root = std::env::temp_dir().join(format!("engine-runtime-{}", uuid::Uuid::now_v7()));
         let runtime = EngineRuntime::new(&root);
@@ -412,6 +460,29 @@ mod tests {
         if !CUDA12_LIBRARIES.iter().all(|library| is_on_the_search_path(library)) {
             assert_eq!(runtime.missing(Some(CudaBuild::Cuda12)).len(), 1);
         }
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// On Linux the engine uses the system CUDA toolkit: nothing is ever
+    /// downloaded, there is no VC runtime to check, and the SONAMEs name
+    /// their CUDA major the way the loader resolves them.
+    #[test]
+    #[cfg(not(windows))]
+    fn linux_needs_no_downloaded_cuda_or_vc_runtime() {
+        for (libraries, major) in [(CUDA13_LIBRARIES, "13"), (CUDA12_LIBRARIES, "12")] {
+            for library in libraries {
+                assert!(library.contains(major), "{library} does not name CUDA {major}");
+                assert!(library.ends_with(&format!(".so.{major}")), "{library} is not a versioned SONAME");
+            }
+        }
+        assert!(VC_RUNTIME_LIBRARIES.is_empty());
+        let root = std::env::temp_dir().join(format!("engine-runtime-linux-{}", uuid::Uuid::now_v7()));
+        let runtime = EngineRuntime::new(&root);
+        assert!(runtime.missing(None).is_empty());
+        assert!(runtime.missing(Some(CudaBuild::Cuda13)).is_empty());
+        assert!(runtime.missing(Some(CudaBuild::Cuda12)).is_empty());
+        assert!(runtime.vc_runtime_missing().is_empty());
+        assert!(runtime.is_ready(Some(CudaBuild::Cuda13)));
         std::fs::remove_dir_all(&root).ok();
     }
 }
