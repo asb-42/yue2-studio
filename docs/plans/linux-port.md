@@ -282,7 +282,7 @@ Verification:
 
 ## 12. Workstream 10 — scripts, packaging, docs
 
-- [x] Port needed scripts to `scripts/*.sh`: DONE `scripts/run-linux.sh` (dev: set envs, run service + vite; `--build`, `--service-only`), `sync-yue-source.sh`, `build-yue-runtime.sh`, `package-linux.sh` (tarball: service + UI + engine + licenses + `run.sh` + `release.json`). No Debian packaging yet — deliberate, pending testing.
+- [x] Port needed scripts to `scripts/*.sh`: DONE `scripts/run-linux.sh` (dev: set envs, run service + vite; `--build`, `--service-only`), `sync-yue-source.sh`, `build-yue-runtime.sh`, `package-linux.sh` (tarball: service + UI + engine + licenses + `run.sh` + `release.json`). Tarball VERIFIED 2026-10-02: clean unpack + `./run.sh` boots, serves UI, fresh root shows first_run with no models and a healthy-but-idle engine bundle. No Debian packaging yet — deliberate, pending testing.
 - [ ] Delete or archive `scripts/*.ps1`, `desktop/` NSIS bits, `tauri.release.conf.template.json`, `installer-*.ns*` in the fork (or keep `desktop/` untouched-but-ignored; deletion is cleaner for a “drop Windows completely” fork).
 - [ ] Write fork README section: system deps, NVIDIA driver/CUDA requirements, bundle layout, env vars, ports (`8791` service, `18087` engine, `3791` vite dev), data dirs, model download behaviour (same catalogue, Linux runtimes), what is intentionally missing (Tauri/VST/DirectML/Whisper?/training? per §§7-8 decisions).
 - [ ] Update `llms.txt` / `docs/mcp-skill.md` service URLs if they change (default: unchanged `http://127.0.0.1:8791/mcp`).
