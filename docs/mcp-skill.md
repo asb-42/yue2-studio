@@ -11,11 +11,15 @@ sees what you do in the studio's window.
 
 ## If the studio is not running yet
 
-1. It is a Windows desktop application. If it is not installed, download the installer or
-   the portable archive from https://github.com/timoncool/YuE2-Studio/releases/latest (it needs an
-   NVIDIA card; the first start offers to download the models).
-2. Start it. The MCP server is up as soon as its window is: `http://127.0.0.1:8791/mcp`.
-   Nothing else to install - no npx, no bridge.
+1. This fork is a Linux service, not a desktop app: clone this repository,
+   build the service (`cargo build --release -p music-server`), the UI
+   (`npm --prefix app run build`) and the engine
+   (`./scripts/build-yue-runtime.sh --output dist/yue2-cpp`), or start
+   everything with `./scripts/run-linux.sh --build` (it needs an NVIDIA
+   card for CUDA; CPU works everywhere, slowly). The first start offers to
+   download the models. See README.md and `docs/linux.md`.
+2. Start it. The MCP server is up as soon as the service answers:
+   `http://127.0.0.1:8791/mcp`. Nothing else to install - no npx, no bridge.
 3. Connect (below), then call `studio_status`. If the models are missing, `models_catalog`
    and `models_download` fetch them.
 
@@ -174,10 +178,11 @@ a minimised window or a hidden tab holds the preview and the render.
   `save_preset`. `.EQF` files: `equalizer_import`, `equalizer_export`.
 - Visualiser: `visualizer_set` with `place` (panel, window), `fullscreen`, `engine`
   (milkdrop, spectrum), `preset` (`visualizer_presets` searches them), `look`, `step`.
-- Winamp mode, the whole window as a Winamp 2 player: `winamp_set` `on: true` (with a
+- Winamp mode, the page as a Winamp 2 player: `winamp_set` `on: true` (with a
   `skin` from `winamp_skins`), `on: false` to come back. While it is on, `player_*` drive it;
   `winamp_set` also opens its windows, shades them, sets its equalizer and MilkDrop,
-  its `scale` (1.2 = 120 %) and `skip_menu`.
+  its `scale` (1.2 = 120 %) and `skip_menu`. (This fork has no desktop shell,
+  so there are no OS windows to move apart; the player itself is unchanged.)
   New skins: `winamp_museum` opens the museum, `winamp_skin_add` takes a downloaded `.wsz`.
 
 **Anything the tools do not cover**
@@ -201,7 +206,7 @@ move around. Check the result with `ui_screenshot`.
   **playlist**: list/create/update/delete.
 - **cover**: draw, set from file, templates, prompt render; **karaoke**: make, delete,
   settings; **recogniser**: install/remove; **stems**: split, get; **separator**: status,
-  install, settings; **midi**: status, transcribe, get, delete, install, remove, cancel; **processing**: start, get, keep, discard, reference; **vst**.
+  install, settings; **midi**: status, transcribe, get, delete, install, remove, cancel; **processing**: start, get, keep, discard, reference (**vst** tools exist but refuse on Linux: no VST3 host in this fork).
 - **lora**: list, install from the catalogue or Hugging Face, import files, update,
   delete, export for ComfyUI (a trained LoRA as one file for ComfyUI's native YuE2).
 - **dataset**: create, add folder or library songs, import, get, update, delete, song

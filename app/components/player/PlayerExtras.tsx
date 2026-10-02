@@ -10,7 +10,7 @@ import type { Song } from '../../types';
 import { EqualizerPanel } from './EqualizerPanel';
 import { VisualizerPanel, openVisualizerWindow, setVisualizerPanelSize, visualizerPanelSize } from './VisualizerPanel';
 import { SPECTRUM_LOOK_IDS, milkdropPresetNames } from './VisualizerView';
-import { WinampMode, restoreWindowAfterReload, type WinampExit } from './WinampMode';
+import { WinampMode, type WinampExit } from './WinampMode';
 import { placePanel } from '../../services/useFloatable';
 
 /**
@@ -71,9 +71,6 @@ export const PlayerExtras: React.FC<Props> = ({ queue, currentSong, currentTime,
   useEffect(() => onEqualizerPanel(setEqOpen), []);
   useEffect(() => onVisualizer(setView), []);
   useEffect(() => onWinamp(() => setWinamp(winampOn())), []);
-  useEffect(() => {
-    restoreWindowAfterReload().catch((error) => console.error('The window did not get its shape back after the Winamp mode:', error));
-  }, []);
 
   // Ctrl+M switches the Winamp mode on and off, as in Spotifast
   useEffect(() => {

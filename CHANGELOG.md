@@ -3,6 +3,24 @@
 What changed, newest first. Dates are release dates; the studio is versioned by its
 Windows build.
 
+## Unreleased — Linux fork (3.4.0-linux.1)
+
+A clean port of upstream 3.4.0 to Linux with the Windows desktop shell, all
+Windows-only code, and the Tauri dependency removed; see README.md for
+attribution and the full porting notes.
+
+- Service, engine and UI run without Windows or Tauri: Axum serves the built
+  UI itself (`YUE_UI_DIR`), `YUE_BIND_ADDR` opens the LAN behind the existing
+  network key guard, playback goes to VLC/mpv/mplayer (`YUE_MEDIA_PLAYER`).
+- `yue-server` builds for Linux (CUDA + CPU, system toolkit, no DLL/cuBLAS
+  downloads); unified-memory NVIDIA cards detected; ONNX Runtime and llama.cpp
+  download verified Ubuntu tarballs per OS/arch; Whisper, DirectML and the
+  Windows-only trainer/MIDI/captioner exes refuse cleanly on Linux.
+- `scripts/sync-yue-source.sh`, `scripts/build-yue-runtime.sh`,
+  `scripts/run-linux.sh`, `scripts/package-linux.sh`; Linux CI.
+- Verified live on ARM64 + GB10/CUDA 13: CUDA song generation, Parakeet
+  karaoke, HT-Demucs stems, llama.cpp assistant write.
+
 ## 2026-10-01 — 3.4.0
 
 ### Added

@@ -1,11 +1,8 @@
 /**
  * Links that leave the studio.
  *
- * The desktop window is a webview, not a browser: an anchor with
- * `target="_blank"` either does nothing or, worse, replaces the application
- * with a web page. Every external link is therefore handed to the system
- * browser through Tauri's opener, and in a plain browser it behaves as it
- * always did.
+ * The fork has no desktop shell: every external link behaves as a browser
+ * link always did - a new tab through the system browser.
  *
  * One listener on the document covers every link in the interface, including
  * the ones inside news items, so nothing has to remember to be special.
@@ -13,26 +10,18 @@
 
 import { API_BASE } from './apiBase';
 
-type Opener = { openUrl?: (url: string) => Promise<void> };
-type Invoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-function bridge(): { opener?: Opener; core?: { invoke?: Invoke } } | null {
-  return (window as unknown as { __TAURI__?: { opener?: Opener; core?: { invoke?: Invoke } } }).__TAURI__ ?? null;
-}
-
-/** True inside the desktop shell. */
-export function isDesktop(): boolean {
-  return Boolean(bridge());
+/** Opens one URL in a new tab. */
+export async function openExternal(url: string): Promise<void> {
+  window.open(url, '_blank', 'noopener');
 }
 
 /**
- * True when the studio service runs on this computer: the desktop shell, a
- * loopback API base, or a same-origin page on localhost. Only then do
- * "show in folder / play in VLC" make sense — anywhere else they would act
- * on the studio's computer, not the viewer's.
+ * True when the studio service runs on this computer: a loopback API base
+ * or a same-origin page on localhost. Only then do "show in folder / play
+ * in VLC" make sense — anywhere else they would act on the studio's
+ * computer, not the viewer's.
  */
 export function isLocalService(): boolean {
-  if (isDesktop()) return true;
   if (typeof location === 'undefined') return false;
   let host: string;
   try {
@@ -41,28 +30,6 @@ export function isLocalService(): boolean {
     return false;
   }
   return host === '' || host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
-}
-
-/** Opens one URL wherever it belongs. */
-export async function openExternal(url: string): Promise<void> {
-  const tauri = bridge();
-  // Two ways in, because which one exists depends on how the shell is built:
-  // the plugin's own binding, or the command behind it.
-  const open = tauri?.opener?.openUrl;
-  if (open) {
-    await open(url).catch(() => fallback(url));
-    return;
-  }
-  const invoke = tauri?.core?.invoke;
-  if (invoke) {
-    await invoke('plugin:opener|open_url', { url }).catch(() => fallback(url));
-    return;
-  }
-  fallback(url);
-}
-
-function fallback(url: string): void {
-  window.open(url, '_blank', 'noopener');
 }
 
 /** Sends every external link click to the system browser. Call once. */

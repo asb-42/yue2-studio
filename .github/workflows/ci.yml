@@ -1,6 +1,6 @@
 name: CI
 
-# The service's tests on Windows, the studio's own platform, and the interface
+# The Linux fork's tests: the service's suite and the interface
 # type-checked, tested and built, on every branch pushed.
 
 on:
@@ -16,12 +16,12 @@ concurrency:
 
 jobs:
   service:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
       - name: Service tests
-        run: cargo test -p music-server --locked
+        run: cargo test --workspace --locked
 
   interface:
     runs-on: ubuntu-latest

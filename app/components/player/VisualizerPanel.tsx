@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { isDesktop, isLocalService } from '../../services/externalLinks';
+import { isLocalService } from '../../services/externalLinks';
 import { ChevronLeft, ChevronRight, ExternalLink, ListOrdered, Lock, LockOpen, Maximize2, Minimize2, Move, Shuffle, X } from 'lucide-react';
 import { useI18n } from '../../context/I18nContext';
 import { ensureAudioGraph, onAudioGraph, type AudioGraph } from '../../services/audioGraph';
@@ -39,45 +39,27 @@ export function setVisualizerPanelSize(size: { width: number; height: number }):
   window.dispatchEvent(new CustomEvent('studio:visualizer-size'));
 }
 
-/** Opens the visualiser in its own window. */
+/** Opens the visualiser in its own window: a same-origin popup shares the
+ * localStorage state and the BroadcastChannel feed with the studio. */
 export async function openVisualizerWindow(): Promise<void> {
-  // a plain browser has no Tauri webview window, but a same-origin popup
-  // shares the localStorage state and the BroadcastChannel feed, so it is a
-  // real second window; the desktop shell keeps its own window instead
-  if (!isDesktop()) {
-    if (!isLocalService()) {
-      setVisualizer({ place: 'panel' });
-      return;
-    }
-    const popup = window.open('visualizer.html', 'yue2-visualizer', 'width=960,height=540');
-    if (!popup) {
-      setVisualizer({ place: 'panel' });
-      return;
-    }
-    setVisualizer({ place: 'window' });
-    // the popup's own page reports its end, but a killed popup says nothing:
-    // poll its handle instead of leaving the state pointing at a dead window
-    const watch = window.setInterval(() => {
-      if (popup.closed) {
-        window.clearInterval(watch);
-        if (visualizer().place === 'window') setVisualizer({ place: 'closed', fullscreen: false });
-      }
-    }, 500);
+  if (!isLocalService()) {
+    setVisualizer({ place: 'panel' });
     return;
   }
-  // Tauri-only from here: loaded lazily so a plain browser never fetches them
-  const { invoke } = await import('@tauri-apps/api/core');
-  const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-  const already = await WebviewWindow.getByLabel('visualizer');
-  await invoke('open_visualizer_window');
+  const popup = window.open('visualizer.html', 'yue2-visualizer', 'width=960,height=540');
+  if (!popup) {
+    setVisualizer({ place: 'panel' });
+    return;
+  }
   setVisualizer({ place: 'window' });
-  if (already) return;
-  // closed by its own frame, the window says nothing on its way out: its end is heard here
-  const opened = await WebviewWindow.getByLabel('visualizer');
-  if (!opened) throw new Error('The visualiser window did not open.');
-  await opened.once('tauri://destroyed', () => {
-    if (visualizer().place === 'window') setVisualizer({ place: 'closed', fullscreen: false });
-  });
+  // the popup's own page reports its end, but a killed popup says nothing:
+  // poll its handle instead of leaving the state pointing at a dead window
+  const watch = window.setInterval(() => {
+    if (popup.closed) {
+      window.clearInterval(watch);
+      if (visualizer().place === 'window') setVisualizer({ place: 'closed', fullscreen: false });
+    }
+  }, 500);
 }
 
 export const EngineTabs: React.FC = () => {

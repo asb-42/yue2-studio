@@ -10,7 +10,6 @@ import { EngineSettings } from './EngineSettings';
 import { SetupGate } from './SetupGate';
 import { CoverTemplateSettings } from './CoverTemplateSettings';
 import { AgentPanel } from './AgentPanel';
-import { isDesktop } from '../services/externalLinks';
 import { onSidebarExtras, setSidebarExtras, sidebarExtras, type SidebarExtras } from '../services/playerPanels';
 
 /**
@@ -208,7 +207,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, initialSec
 
                 <SidebarExtrasSetting />
 
-                {isDesktop() && <NetworkAccessSetting />}
+                <NetworkAccessSetting />
               </div>
             )}
 

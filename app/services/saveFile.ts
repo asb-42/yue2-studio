@@ -1,13 +1,11 @@
 import { apiUrl } from './apiBase';
-import { isDesktop } from './externalLinks';
 
 /**
  * "Save as" for anything the window hands the user.
  *
- * The system's Save dialog asks where, starting in the folder chosen last; the
- * service then writes the file - one it serves, read from its own address, or
- * bytes the window made - and reports how far it has got. The files panel
- * shows each save from those reports.
+ * The fork has no desktop shell with a native Save dialog, so the browser
+ * always downloads the file itself. (The service keeps its own choose/write
+ * flow for agents over MCP.)
  */
 
 export type SaveSource = { url: string } | { blob: Blob };
@@ -47,35 +45,16 @@ async function answer(response: Response): Promise<Record<string, unknown>> {
  * to catch.
  */
 export async function saveFile(name: string, source: SaveSource): Promise<void> {
-  // A browser on another computer: the Save dialog would open on the studio's
-  // computer, so the browser downloads the file itself.
-  if (!isDesktop()) {
-    const link = document.createElement('a');
-    link.href = 'url' in source ? apiUrl(source.url) : URL.createObjectURL(source.blob);
-    link.download = name;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    if (!('url' in source)) window.setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
-    return;
-  }
-  let id = `failed-${Date.now()}`;
-  try {
-    const place = await answer(await fetch(apiUrl('/v1/files/save'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    }));
-    if (place.cancelled) return;
-    id = String(place.id);
-    tell({ id, name: String(place.name ?? name), path: String(place.path), state: 'saving', written: 0 });
-    const body = 'url' in source
-      ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: source.url }) }
-      : { headers: { 'Content-Type': 'application/octet-stream' }, body: source.blob };
-    await answer(await fetch(apiUrl(`/v1/files/save/${encodeURIComponent(id)}`), { method: 'POST', ...body }));
-  } catch (problem) {
-    tell({ id, name, state: 'error', error: problem instanceof Error ? problem.message : String(problem) });
-  }
+  const link = document.createElement('a');
+  link.href = 'url' in source ? apiUrl(source.url) : URL.createObjectURL(source.blob);
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  const bytes = 'url' in source ? null : source.blob.size;
+  if (!('url' in source)) window.setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
+  // the files panel keeps a history of downloads, like it kept saves
+  tell({ id: `dl-${Date.now()}`, name, state: 'done', written: bytes ?? undefined, total: bytes });
 }
 
 /** A saved file, opened in the studio computer's native media player (VLC, mpv, ...). Returns the player it opened in. */

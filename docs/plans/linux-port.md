@@ -57,7 +57,7 @@ Keep:
 
 Drop or stub for v1:
 
-- [ ] `desktop/` Tauri shell (`src-tauri/src/lib.rs`, `tauri.conf.json`, NSIS hooks, updater).
+- [x] `desktop/` Tauri shell deleted (DONE: `git rm -r desktop/`, all 5 `scripts/*.ps1`, stale `app/README.md`); Windows PE bundle self-check removed with it (Linux uses the `ldd` step instead).
 - [ ] `scripts/*.ps1` Windows build/release scripts.
 - [ ] DirectML, Win32 job objects, WebView2 args, `SetWindowRgn`, `explorer.exe`, `LOCALAPPDATA`, VC runtime, `LoadLibraryExW` preload.
 
@@ -73,8 +73,8 @@ npm --prefix app run dev        # 127.0.0.1:3791
 - [x] Create fork branch/repo; keep upstream remote for cherry-picks.
 - [ ] Add `docs/plans/linux-port.md` (this file) + per-stream issues if using trackers.
 - [ ] Add `docs/plans/linux-acceptance.md` checklist (or use §11 here as source of truth).
-- [ ] Decide versioning: e.g. `3.4.0-linux.1` or `0.1.0-fork`; decouple `app/package.json:4` version from `desktop/src-tauri/tauri.conf.json:4` (see §9.4).
-- [ ] Add Linux CI job: `cargo test --workspace`, `npm --prefix app test`, `cargo build -p music-server`.
+- [x] Decide versioning: `3.4.0-linux.1` in `app/package.json` (fork of upstream 3.4.0; `__APP_VERSION__` reads it since `desktop/` is gone).
+- [x] Linux CI: `.github/workflows/ci.yml` runs `cargo test --workspace --locked` + UI build/types/tests on ubuntu-latest.
 - [x] Pin Linux toolchain: `rust-toolchain.toml` channel `stable-x86_64-pc-windows-msvc` → `stable` (was blocking rustup entirely on Linux). Verified with Rust 1.99 / Node 22.
 - [ ] Document system deps (build-essential, cmake, ninja, CUDA toolkit optional, Vulkan SDK optional, Node 20+, pkg-config, OpenSSL/rustls notes).
 
@@ -267,7 +267,8 @@ Tauri usage is small and already partially guarded:
 - [ ] `app/services/externalLinks.ts:18-38` — uses `__TAURI__` bridge with `fallback(url)`; keep + test fallback in plain browser.
 - [ ] `app/services/apiBase.ts:27` — already special-cases `tauri.localhost`; ensure dev proxy (`vite.config.ts:12-39`) and production same-origin serving both work.
 - [ ] `app/components/player/VisualizerPanel.tsx:51-58` — `invoke('open_visualizer_window')` + `WebviewWindow.getByLabel('visualizer')`. Web fallback: `window.open('/visualizer.html')`; keep multi-window messaging working (visualizer is a second rollup input at `vite.config.ts:47-53`).
-- [ ] `app/components/player/WinampMode.tsx:3-5` — imports `@tauri-apps/api/window` + `@tauri-apps/api/webview`, calls `invoke('set_window_region', ...)` for shaped windows. Web fallback: skip region shaping (CSS only), keep Winamp skins/player logic; make the import lazy/dynamic so the bundle loads without Tauri.
+- [x] WinampMode OS window management removed (DONE: shaping/region/monitor/decorations/zoom-via-webview gone; fullscreen page with CSS zoom; `@tauri-apps/api` dropped from `package.json`/lock; `restoreWindowAfterReload` deleted). Player, skins, EQ carry-over, agent control unchanged.
+- [x] Remaining UI shell traces removed (DONE): `isDesktop`/`__TAURI__` bridge gone, `openExternal` always opens a tab, `saveFile` always browser-downloads (+ download history in Files panel), visualizer is popup-only, network-access setting always shown, reveal gated on `isLocalService` like play.
 - [ ] `app/visualizerWindow.tsx:4` — same treatment as WinampMode.
 - [x] Remove hard version coupling: `app/vite.config.ts:7` reads `../desktop/src-tauri/tauri.conf.json` for `__APP_VERSION__`. Fork is deleting `desktop/`; read version from `app/package.json` (or a fork `version.json`) instead. Also `prebuild/predev` runs `node ../scripts/changelog.mjs` (`app/package.json:13-14`) — keep script or vendor it (it only needs Node at build time, which is allowed; the “no Node in runtime path” rule is about the shipped runtime). DONE 2026-10-02: falls back to `app/package.json` when the Tauri manifest is absent; `vite build` verified.
 - [x] Decide static serving: DONE 2026-10-02 — Axum serves `app/dist` itself (`YUE_UI_DIR`, else `app/dist` beside CWD) through the existing `remote::interface` fallback with SPA routing and traversal guard (unit-tested); `run-linux.sh --build` sets it. Live-verified: `/` + JS + `visualizer.html` + SPA route 200, missing file 404, API intact.
@@ -281,7 +282,7 @@ Verification:
 
 ## 12. Workstream 10 — scripts, packaging, docs
 
-- [x] Port needed scripts to `scripts/*.sh`: DONE `scripts/run-linux.sh` (dev: set envs, run service + vite; `--build`, `--service-only`). Still open: `sync-yue-source.sh`, `build-yue-runtime.sh`, `build-train-runtime.sh`, `build-midi-runtime.sh`, `package-linux.sh`.
+- [x] Port needed scripts to `scripts/*.sh`: DONE `scripts/run-linux.sh` (dev: set envs, run service + vite; `--build`, `--service-only`), `sync-yue-source.sh`, `build-yue-runtime.sh`, `package-linux.sh` (tarball: service + UI + engine + licenses + `run.sh` + `release.json`). No Debian packaging yet — deliberate, pending testing.
 - [ ] Delete or archive `scripts/*.ps1`, `desktop/` NSIS bits, `tauri.release.conf.template.json`, `installer-*.ns*` in the fork (or keep `desktop/` untouched-but-ignored; deletion is cleaner for a “drop Windows completely” fork).
 - [ ] Write fork README section: system deps, NVIDIA driver/CUDA requirements, bundle layout, env vars, ports (`8791` service, `18087` engine, `3791` vite dev), data dirs, model download behaviour (same catalogue, Linux runtimes), what is intentionally missing (Tauri/VST/DirectML/Whisper?/training? per §§7-8 decisions).
 - [ ] Update `llms.txt` / `docs/mcp-skill.md` service URLs if they change (default: unchanged `http://127.0.0.1:8791/mcp`).

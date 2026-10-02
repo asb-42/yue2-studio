@@ -12,13 +12,23 @@ data/
 app/data/changelog.json
 models/
 engines/*/bin/
-desktop/src-tauri/resources/
 *.db
 *.db-shm
 *.db-wal
 
+# Model weights and datasets are runtime downloads, never sources. The
+# directory rules above cover the conventional layouts; the extensions below
+# catch a weight file dropped anywhere else by accident.
+*.gguf
+*.safetensors
+*.onnx
+*.onnx.data
+*.pt
+*.ckpt
+
 # Built installers and portable archives belong to a GitHub release, not here.
 release/
+yue2-studio-linux-*.tar.gz
 
 # Local engineering notes: they never belong to the published repository.
 HANDOFF.md
@@ -26,7 +36,6 @@ NEXT_SESSION_PROMPT.md
 
 # Local editor and agent settings.
 .claude/
-desktop/src-tauri/tauri.release.conf.json
 *.password
 /target-check
 /_archive-*

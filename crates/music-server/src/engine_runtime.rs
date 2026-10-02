@@ -269,77 +269,11 @@ pub fn imported_libraries(binary: &Path) -> Result<Vec<String>> {
     Ok(names)
 }
 
-/// Libraries every Windows machine has, or that arrive with the display
-/// driver. Everything else has to be shipped or downloaded.
-///
-/// Windows-only with the rest of the PE check.
-#[cfg(all(test, windows))]
-fn is_provided_by_the_system(name: &str) -> bool {
-    let name = name.to_ascii_lowercase();
-    name.starts_with("api-ms-win-")
-        || name.starts_with("ext-ms-win-")
-        // The display driver's own library: NVIDIA's guide is explicit that
-        // this one is never redistributed - the user installs a driver.
-        || name == "nvcuda.dll"
-        || [
-            "kernel32.dll",
-            "kernelbase.dll",
-            "user32.dll",
-            "advapi32.dll",
-            "shell32.dll",
-            "ole32.dll",
-            "oleaut32.dll",
-            "ws2_32.dll",
-            "crypt32.dll",
-            "bcrypt.dll",
-            "ntdll.dll",
-            "rpcrt4.dll",
-            "setupapi.dll",
-            "cfgmgr32.dll",
-            "gdi32.dll",
-            "version.dll",
-            "dbghelp.dll",
-            "powrprof.dll",
-            "psapi.dll",
-            "userenv.dll",
-            "winmm.dll",
-            "msvcrt.dll",
-        ]
-        .contains(&name.as_str())
-}
-
 /// What a binary needs that is neither beside it nor supplied by Windows.
 ///
-/// Follows the chain: `yue-server.exe` imports `ggml.dll`, which imports
-/// `ggml-cuda.dll`, which is where cuBLAS actually comes in. Checking only the
-/// executable's own imports would have found nothing wrong with the release
-/// that could not start.
-///
-/// Windows-only with the rest of the PE check.
-#[cfg(all(test, windows))]
-pub fn unresolved_dependencies(directory: &Path, entry_point: &str) -> Result<Vec<String>> {
-    let mut seen: Vec<String> = Vec::new();
-    let mut queue = vec![entry_point.to_string()];
-    let mut missing = Vec::new();
-    while let Some(name) = queue.pop() {
-        let lowered = name.to_ascii_lowercase();
-        if seen.contains(&lowered) {
-            continue;
-        }
-        seen.push(lowered);
-        let path = directory.join(&name);
-        if !path.is_file() {
-            missing.push(name);
-            continue;
-        }
-        for import in imported_libraries(&path)? {
-            if !is_provided_by_the_system(&import) {
-                queue.push(import);
-            }
-        }
-    }
-    Ok(missing)
-}
+/// Removed with the staged-bundle check above: the Linux fork stages no
+/// Windows bundle, and the `ldd` step in build-yue-runtime.sh covers the
+/// Linux one. The import-table reader stays for the notepad test below.
 
 #[cfg(test)]
 mod tests {
@@ -378,52 +312,15 @@ mod tests {
 
     /// The release that shipped without cuBLAS passed every test there was,
     /// because no test ever looked at what the engine binary asks the loader
-    /// for. This one does: whatever the staged bundle imports is either beside
-    /// it, supplied by Windows, or downloaded on first start - and nothing
-    /// else is allowed.
+    /// for. On Windows this checked the staged bundle the same way; the Linux
+    /// fork stages no Windows bundle (see build-yue-runtime.sh and the `ldd`
+    /// step below), so the check was removed with it.
+    ///
+    /// Linux counterpart: stage the runtime, then read what the loader needs:
+    /// `ldd yue-server` and `ldd libggml-cuda.so` must show no missing
+    /// libraries. That runs where the engine is built, not in this suite.
     #[test]
-    #[cfg(windows)]
-    fn the_staged_engine_bundle_can_actually_be_loaded() {
-        let bundle = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../desktop/src-tauri/resources/yue2-cpp")
-            .canonicalize();
-        let Ok(bundle) = bundle else {
-            // No engine has been built into the bundle on this machine, which
-            // is the normal state of a checkout that only touches the service.
-            return;
-        };
-        if !bundle.join("yue-server.exe").is_file() {
-            return;
-        }
-        // The CUDA backends load at run time from their folders and resolve
-        // their imports from the executable's, so each is checked from there.
-        let mut entry_points = vec!["yue-server.exe".to_string()];
-        for build in [CudaBuild::Cuda13, CudaBuild::Cuda12] {
-            let backend = format!("{}/ggml-cuda.dll", build.folder());
-            if bundle.join(&backend).is_file() {
-                entry_points.push(backend);
-            }
-        }
-        let handled: Vec<&str> =
-            CUDA13_LIBRARIES.iter().chain(CUDA12_LIBRARIES.iter()).chain(VC_RUNTIME_LIBRARIES.iter()).copied().collect();
-        for entry_point in entry_points {
-            let missing = unresolved_dependencies(&bundle, &entry_point).expect("read the bundle's import tables");
-            let unexpected: Vec<&String> = missing
-                .iter()
-                .filter(|name| !handled.iter().any(|library| library.eq_ignore_ascii_case(name)))
-                .collect();
-            assert!(
-                unexpected.is_empty(),
-                "{entry_point} imports libraries that are neither shipped nor installed on first start: {unexpected:?}. \
-                 Ship them next to yue-server.exe, or add them to this module so the studio fetches them."
-            );
-        }
-    }
-
-    /// The import table is the whole basis of the check above; if it cannot be
-    /// read, the check silently passes on anything.
-    #[test]
-    #[cfg(windows)]
+    #[cfg(all(test, windows))]
     fn imports_are_read_out_of_a_real_binary() {
         let system = Path::new("C:/Windows/System32/notepad.exe");
         if !system.is_file() {

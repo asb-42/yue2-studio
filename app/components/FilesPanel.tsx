@@ -106,13 +106,15 @@ export const FilesPanel: React.FC = () => {
                 {file.path && <div className="mt-1 truncate text-[10px] text-zinc-500" title={file.path}>{file.path}</div>}
                 {file.state === 'done' && file.path && (
                   <>
-                    <button
-                      type="button"
-                      onClick={() => void revealSaved(file.path as string)}
-                      className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-zinc-300 px-2.5 py-1 text-[12px] text-zinc-600 hover:border-pink-400 hover:text-pink-600 dark:border-white/15 dark:text-zinc-300"
-                    >
-                      <FolderOpen size={13} /> {t('filesShowInFolder')}
-                    </button>
+                    {isLocalService() && (
+                      <button
+                        type="button"
+                        onClick={() => void revealSaved(file.path as string)}
+                        className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-zinc-300 px-2.5 py-1 text-[12px] text-zinc-600 hover:border-pink-400 hover:text-pink-600 dark:border-white/15 dark:text-zinc-300"
+                      >
+                        <FolderOpen size={13} /> {t('filesShowInFolder')}
+                      </button>
+                    )}
                     {isLocalService() && (
                       <button
                         type="button"

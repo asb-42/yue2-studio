@@ -1,8 +1,8 @@
 # YuE2 Studio
 
-> A Windows desktop studio for YuE2 (M-A-P), which writes a score in ABC notation and then sings it, running on the user's own NVIDIA card. While it is open it serves an MCP server at http://127.0.0.1:8791/mcp that an agent uses to do everything the studio does: songs from a style and lyrics, editable scores, covers of recordings, the library, covers, stems, MIDI from any track, karaoke, audio processing, video clips, the player, LoRA, and a LoRA trained from a folder of songs end to end. The agent also sees the studio's window and works it like a user.
+> A Linux studio for YuE2 (M-A-P) - a fork of timoncool/YuE2-Studio without the Windows desktop shell - which writes a score in ABC notation and then sings it, running on the user's own NVIDIA card (CPU works too, slowly). While it is open it serves an MCP server at http://127.0.0.1:8791/mcp that an agent uses to do everything the studio does: songs from a style and lyrics, editable scores, covers of recordings, the library, covers, stems, MIDI from any track, karaoke, audio processing, video clips, the player, LoRA, and a LoRA trained from a folder of songs end to end. The agent also sees the studio's window and works it like a user.
 
-For an agent given this repository: install the studio from the latest release, start it, connect to its MCP server, and read the skill the server serves (resource `studio://skill`, prompt `studio`) - it names every tool, what the model reads, and the recipes. Start every session with the tool `studio_status`.
+For an agent given this repository: build the service (`cargo build --release -p music-server`), the UI (`npm --prefix app run build`) and the engine (`./scripts/build-yue-runtime.sh --output dist/yue2-cpp`), start it (`./scripts/run-linux.sh --build`), connect to its MCP server, and read the skill the server serves (resource `studio://skill`, prompt `studio`) - it names every tool, what the model reads, and the recipes. Start every session with the tool `studio_status`.
 
 ## Connect
 
