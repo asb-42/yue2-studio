@@ -208,15 +208,51 @@ pub fn set_asset_source(source: AssetSource) {
 
 /// The interface for a browser: `/` is the page, anything else a file of it.
 pub async fn interface(request: Request) -> Response {
-    let Some(source) = assets().get() else {
-        return (StatusCode::NOT_FOUND, "this service has no interface of its own; open the studio window").into_response();
-    };
-    let path = request.uri().path().trim_start_matches('/');
-    let path = if path.is_empty() { "index.html" } else { path };
-    match source(path).or_else(|| (!path.contains('.')).then(|| source("index.html")).flatten()) {
-        Some((bytes, mime)) => ([(header::CONTENT_TYPE, mime)], bytes).into_response(),
-        None => StatusCode::NOT_FOUND.into_response(),
+    if let Some(source) = assets().get() {
+        let path = request.uri().path().trim_start_matches('/');
+        let path = if path.is_empty() { "index.html" } else { path };
+        match source(path).or_else(|| (!path.contains('.')).then(|| source("index.html")).flatten()) {
+            Some((bytes, mime)) => return ([(header::CONTENT_TYPE, mime)], bytes).into_response(),
+            None => return StatusCode::NOT_FOUND.into_response(),
+        }
     }
+    if let Some(dir) = ui_dir() {
+        return ui_file(&dir, request).await;
+    }
+    (StatusCode::NOT_FOUND, "this service has no interface of its own; open the studio window").into_response()
+}
+
+/// The built web interface on disk: `YUE_UI_DIR`, or `app/dist` beside the
+/// working directory (what `run-linux.sh --build` produces). Absent when the
+/// UI was never built, in which case the API-only message above stands.
+fn ui_dir() -> Option<std::path::PathBuf> {
+    if let Some(dir) = std::env::var_os("YUE_UI_DIR").map(std::path::PathBuf::from) {
+        return dir.is_dir().then_some(dir);
+    }
+    let beside_cwd = std::env::current_dir().unwrap_or_default().join("app").join("dist");
+    beside_cwd.is_dir().then_some(beside_cwd)
+}
+
+/// One file of the built interface, with the SPA fallback the Tauri source
+/// has: extensionless routes serve the shell. `..` never escapes the
+/// directory - the canonical path must stay inside it.
+async fn ui_file(dir: &std::path::Path, request: Request) -> Response {
+    use tower::ServiceExt;
+    use tower_http::services::ServeFile;
+    let root = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let mut name = request.uri().path().trim_start_matches('/').to_string();
+    if name.is_empty() {
+        name = "index.html".to_string();
+    }
+    let mut file = root.join(&name);
+    if !file.is_file() && !name.contains('.') {
+        file = root.join("index.html");
+    }
+    let inside = std::fs::canonicalize(&file).ok().filter(|canonical| canonical.starts_with(&root));
+    let Some(path) = inside.filter(|_| file.is_file()) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    ServeFile::new(path).oneshot(request).await.into_response()
 }
 
 #[cfg(test)]
@@ -239,5 +275,42 @@ mod tests {
         assert!(same("abc", "abc"));
         assert!(!same("abc", "abd"));
         assert!(!same("abc", "ab"));
+    }
+
+    fn ui_request(uri: &str) -> Request {
+        Request::builder().uri(uri).body(axum::body::Body::empty()).expect("a request")
+    }
+
+    fn ui_root(files: &[(&str, &str)]) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("ui-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&root).unwrap();
+        for (name, body) in files {
+            std::fs::write(root.join(name), body).unwrap();
+        }
+        root
+    }
+
+    #[tokio::test]
+    async fn the_interface_serves_its_page_and_falls_back_to_it() {
+        let root = ui_root(&[("index.html", "<p>studio</p>"), ("app.js", "1")]);
+        assert_eq!(ui_file(&root, ui_request("/")).await.status(), StatusCode::OK);
+        assert_eq!(ui_file(&root, ui_request("/app.js")).await.status(), StatusCode::OK);
+        // an extensionless route is the shell, like the Tauri source serves
+        assert_eq!(ui_file(&root, ui_request("/library/songs")).await.status(), StatusCode::OK);
+        // a missing file is a 404, not the shell and not the disk
+        assert_eq!(ui_file(&root, ui_request("/nope.js")).await.status(), StatusCode::NOT_FOUND);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[tokio::test]
+    async fn dot_dot_never_leaves_the_ui_directory() {
+        let root = ui_root(&[("index.html", "<p>studio</p>")]);
+        let secret = root.parent().unwrap().join(format!("secret-{}.txt", uuid::Uuid::now_v7().simple()));
+        std::fs::write(&secret, "no").unwrap();
+        for uri in ["/../secret", &format!("/../{}", secret.file_name().unwrap().to_string_lossy())] {
+            assert_eq!(ui_file(&root, ui_request(uri)).await.status(), StatusCode::NOT_FOUND, "{uri}");
+        }
+        std::fs::remove_file(&secret).ok();
+        std::fs::remove_dir_all(&root).ok();
     }
 }

@@ -75,8 +75,9 @@ done
 
 if [ "$MODE" = "build" ]; then
   npm --prefix "$REPO_ROOT/app" run build
-  echo "UI built to app/dist — serve it behind any static server with /v1 proxied to 127.0.0.1:8791,"
-  echo "or point a browser at the service directly once static serving lands (see docs/plans/linux-port.md §11)."
+  export YUE_UI_DIR="$REPO_ROOT/app/dist"
+  echo "UI:      http://127.0.0.1:8791/ (served by the service from $YUE_UI_DIR)"
+  echo "         (needs YUE_UI_DIR set when run directly: export YUE_UI_DIR=$REPO_ROOT/app/dist)"
   wait "$SERVICE_PID"
 else
   echo "data:    $DATA_ROOT"

@@ -11,8 +11,13 @@ dropped; system playback goes to VLC/mpv/mplayer through
 ```sh
 ./scripts/run-linux.sh            # debug service (127.0.0.1:8791) + vite UI (127.0.0.1:3791)
 ./scripts/run-linux.sh --service-only
-./scripts/run-linux.sh --build    # release service + static vite build
+./scripts/run-linux.sh --build    # release service + static vite build, UI served by the service itself
 ```
+
+With `--build` (or `YUE_UI_DIR=/path/to/app/dist` set manually) the service
+serves the built interface on its own port: open `http://127.0.0.1:8791/`
+directly, no dev server needed. Same-origin, so the visualiser popup,
+`saving`, and downloads all work without CORS or proxying.
 
 System packages: `build-essential cmake pkg-config git curl python3 node 20+`.
 `ninja` is used when present (no sudo? bootstrap it: see below).
@@ -63,6 +68,8 @@ documented `data/` layout).
 ## Environment
 
 | Variable | Default | Meaning |
+|---|---|---|
+| `YUE_UI_DIR` | `app/dist` beside CWD (set by launcher) | built web interface served by the service itself |
 |---|---|---|
 | `YUE_STUDIO_DATA_ROOT` | `${XDG_DATA_HOME:-~/.local/share}/yue2-studio` | library, media, settings, logs, downloads |
 | `YUE_MODELS_ROOT` | `$DATA/models/yue2-cpp` | YuE2 weights |
