@@ -1018,9 +1018,16 @@ pub async fn serve() -> anyhow::Result<()> {
         });
     }
 
-    let address = SocketAddr::from((bind_to, listen_port()));
+    let address = SocketAddr::new(bind_ip(bind_to), listen_port());
     let listener = tokio::net::TcpListener::bind(address).await?;
     println!("music-server listening on http://{address}");
+    if !address.ip().is_loopback() {
+        if remote::network_open() {
+            println!("access from the network is on: open http://<this-machine>:{} with the access key (Settings, or GET /v1/network on loopback)", address.port());
+        } else {
+            eprintln!("[WARN] bound to {address} but access from the network is off, so other computers get 403. From this computer: PUT /v1/network {{\"enabled\": true}}, then GET /v1/network for the key.");
+        }
+    }
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .with_graceful_shutdown(shutdown())
         .await?;
@@ -4361,6 +4368,21 @@ async fn create_openrouter_completion(
 /// second instance can run beside a released one.
 fn listen_port() -> u16 {
     env::var("YUE_STUDIO_PORT").ok().and_then(|value| value.parse().ok()).unwrap_or(8791)
+}
+
+/// The address the studio binds: loopback, the network-enabled wildcard from
+/// setup, or `YUE_BIND_ADDR` when set (`0.0.0.0` opens the LAN, e.g.
+/// `http://192.168.178.50:8791`). Binding is not access: browsers off this
+/// computer still go through `remote::guard` and need network access enabled
+/// with its key, so opening the bind does not open the studio.
+fn bind_ip(fallback: [u8; 4]) -> std::net::IpAddr {
+    if let Some(addr) = env::var("YUE_BIND_ADDR").ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()) {
+        match addr.parse() {
+            Ok(ip) => return ip,
+            Err(_) => eprintln!("[ERROR] YUE_BIND_ADDR={addr} is not an IP address, binding loopback instead"),
+        }
+    }
+    fallback.into()
 }
 
 fn chrono_like_timestamp() -> String { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs().to_string()).unwrap_or_default() }
@@ -7995,9 +8017,25 @@ mod tests {
         assert_eq!(adoptable_files(root.path(), 0).len(), 1, "depth 0 is the folder itself");
     }
 
+    /// The bind address: loopback unless `YUE_BIND_ADDR` names an IP, and a
+    /// bad value falls back to loopback instead of failing the start.
+    /// (`YUE_BIND_ADDR` is read by no other test, so no lock is needed.)
     #[test]
-    fn a_device_failure_is_told_from_running_out_of_memory() {
-        let ptx = "[lm-kv] allocated 2 sets\nggml_cuda_compute_forward: get_rows failed\ncuda error: the provided ptx was compiled with an unsupported toolchain.";
+    fn the_bind_stays_loopback_until_asked_otherwise() {
+        let fallback = [127, 0, 0, 1];
+        unsafe { std::env::remove_var("YUE_BIND_ADDR") };
+        assert!(bind_ip(fallback).is_loopback());
+        unsafe { std::env::set_var("YUE_BIND_ADDR", "0.0.0.0") };
+        assert_eq!(bind_ip(fallback), std::net::IpAddr::from([0, 0, 0, 0]));
+        unsafe { std::env::set_var("YUE_BIND_ADDR", " 192.168.178.50 ") };
+        assert_eq!(bind_ip(fallback), std::net::IpAddr::from([192, 168, 178, 50]));
+        unsafe { std::env::set_var("YUE_BIND_ADDR", "not-an-ip") };
+        assert!(bind_ip(fallback).is_loopback());
+        unsafe { std::env::remove_var("YUE_BIND_ADDR") };
+    }
+
+    #[test]
+    fn a_device_failure_is_told_from_running_out_of_memory() {        let ptx = "[lm-kv] allocated 2 sets\nggml_cuda_compute_forward: get_rows failed\ncuda error: the provided ptx was compiled with an unsupported toolchain.";
         assert!(describes_device_failure(ptx));
         assert!(describes_device_failure("[load] fatal: self-test on vulkan0 failed (status -1, result nan, expected 132)"));
         assert!(describes_device_failure("[load] fatal: yue_cuda_backend=c:\\x\\cuda13\\ggml-cuda.dll did not load"));

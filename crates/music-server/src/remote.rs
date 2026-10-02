@@ -130,6 +130,13 @@ pub async fn change(
     Ok(status(ConnectInfo(peer), headers).await)
 }
 
+/// Whether browsers off this computer get in: network access enabled with a
+/// key. Binding the LAN without this still answers them 403 (see `guard`).
+pub fn network_open() -> bool {
+    let access = current();
+    access.enabled && !access.key.is_empty()
+}
+
 /// The key a request carries: `?key=`, the cookie, or a bearer token.
 fn carried_key(request: &Request) -> Option<String> {
     let from_query = request.uri().query().and_then(|query| query.split('&').find_map(|pair| pair.strip_prefix("key=")).map(str::to_string));

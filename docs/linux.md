@@ -19,6 +19,29 @@ serves the built interface on its own port: open `http://127.0.0.1:8791/`
 directly, no dev server needed. Same-origin, so the visualiser popup,
 `saving`, and downloads all work without CORS or proxying.
 
+## LAN access
+
+The service binds loopback unless told otherwise. For another computer on
+your network:
+
+```sh
+YUE_BIND_ADDR=0.0.0.0 ./scripts/run-linux.sh --build   # or export it
+```
+
+Binding is not access: browsers off this computer still need network access
+enabled with its key (loopback stays keyless). From the studio computer:
+
+```sh
+curl -X PUT http://127.0.0.1:8791/v1/network \
+  -H 'Content-Type: application/json' -d '{"enabled": true}'
+curl http://127.0.0.1:8791/v1/network   # shows the 64-char key (loopback only)
+```
+
+Then open `http://<this-machine>:8791/?key=<key>` once (it becomes a
+cookie afterwards); API clients send `Authorization: Bearer <key>`. Without
+the key the LAN gets 403 with instructions. To turn it off again:
+`PUT /v1/network {"enabled": false}` (loopback only).
+
 System packages: `build-essential cmake pkg-config git curl python3 node 20+`.
 `ninja` is used when present (no sudo? bootstrap it: see below).
 Optional: CUDA toolkit 12 or 13 (`nvcc`), Vulkan SDK + `glslc`.
@@ -69,6 +92,7 @@ documented `data/` layout).
 
 | Variable | Default | Meaning |
 |---|---|---|
+| `YUE_BIND_ADDR` | loopback (or setup wildcard) | bind address; `0.0.0.0` opens the LAN (still key-gated, see above) |
 | `YUE_UI_DIR` | `app/dist` beside CWD (set by launcher) | built web interface served by the service itself |
 |---|---|---|
 | `YUE_STUDIO_DATA_ROOT` | `${XDG_DATA_HOME:-~/.local/share}/yue2-studio` | library, media, settings, logs, downloads |
