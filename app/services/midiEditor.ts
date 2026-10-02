@@ -109,6 +109,19 @@ export function base64Of(data: ArrayBuffer): string {
   return btoa(raw);
 }
 
+/**
+ * Whether the embedded piano-roll editor can start its synth: it loads an
+ * AudioWorklet, which browsers only expose in secure contexts (localhost or
+ * HTTPS) — never on plain `http://192.168.x.x`. Without it the editor dies
+ * in launch with a cryptic bundle error, so callers say so themselves first.
+ */
+export function audioWorkletsAvailable(): boolean {
+  if (typeof window === 'undefined') return false;
+  const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctor) return false;
+  return 'audioWorklet' in Ctor.prototype;
+}
+
 /** A library track's MIDI file. */
 export async function trackMidi(songId: string): Promise<ArrayBuffer> {
   const response = await fetch(`/v1/library/songs/${encodeURIComponent(songId)}/midi/file`);

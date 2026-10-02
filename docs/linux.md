@@ -42,6 +42,13 @@ cookie afterwards); API clients send `Authorization: Bearer <key>`. Without
 the key the LAN gets 403 with instructions. To turn it off again:
 `PUT /v1/network {"enabled": false}` (loopback only).
 
+LAN limits (browser security, not this fork): `AudioWorklet` — the piano-roll
+editor's synth and the visualiser pop-out feed — is only exposed on
+localhost or HTTPS, never on plain LAN `http`. Over LAN those two say so
+plainly instead of crashing; use `http://localhost:8791` (SSH tunnel) or
+serve HTTPS for them. Everything else, MIDI preview included, works wherever
+the page loads.
+
 First access without touching the terminal twice: when the service starts
 bound off-loopback with access already on, it prints the full
 `http://<this-machine>:8791?key=…` URL once to its log; enabling access via

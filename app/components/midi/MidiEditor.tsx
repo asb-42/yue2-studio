@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { AudioLines, Check, Library, Loader2, Piano, Save, X } from 'lucide-react';
 import { useI18n } from '../../context/I18nContext';
 import type { TranslationKey } from '../../i18n/translations';
-import { addMidiTrack, base64Of, keepTrackMidi, MIDI_EDITOR_PAGE, MidiEditorLink, scoreFromMidi, trackMidi, type EditorEvent } from '../../services/midiEditor';
+import { addMidiTrack, audioWorkletsAvailable, base64Of, keepTrackMidi, MIDI_EDITOR_PAGE, MidiEditorLink, scoreFromMidi, trackMidi, type EditorEvent } from '../../services/midiEditor';
 import { mapNativeLibrarySong } from '../../services/nativeLibrary';
 import { failed, markScore, scoreMidi } from '../../services/scoreApi';
 import type { Song } from '../../types';
@@ -44,12 +44,18 @@ export const MidiEditor: React.FC<{ source: MidiEditorSource; onClose: () => voi
   const [status, setStatus] = useState<{ text: string; bad: boolean } | null>(null);
   const [asking, setAsking] = useState(false);
   const [page] = useState(() => `${MIDI_EDITOR_PAGE}?studio=1&lang=${language}&theme=${theme()}`);
+  // The embedded editor boots an AudioWorklet synth, which browsers only
+  // expose in secure contexts. Without it the frame dies in launch with a
+  // cryptic bundle error, so say so up front instead of opening it.
+  const [worklets] = useState(() => audioWorkletsAvailable());
+  const localUrl = `http://localhost:${window.location.port || '8791'}/`;
   // what the window was opened on: the link to the frame lives as long as the
   // window, and a request waiting on it (a render takes seconds) must not be
   // dropped by a re-render
   const start = useRef({ source, untitled: say('midiEdUntitled') });
 
   useEffect(() => {
+    if (!worklets) return;
     const element = frame.current;
     if (!element) return;
     const { source: opening, untitled } = start.current;
@@ -222,8 +228,16 @@ export const MidiEditor: React.FC<{ source: MidiEditorSource; onClose: () => voi
             </div>
           </div>
           <div className="relative min-h-0 flex-1">
-            <iframe ref={frame} src={page} title={say(title)} allow="midi; autoplay" className="absolute inset-0 h-full w-full border-0" />
-            {!ready && (
+            {worklets ? (
+              <iframe ref={frame} src={page} title={say(title)} allow="midi; autoplay" className="absolute inset-0 h-full w-full border-0" />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center bg-white p-6 dark:bg-zinc-900">
+                <p className="max-w-md text-center text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
+                  {say('midiEdNoWorklets')}{' '}{say('midiEdNoWorkletsFix', { url: localUrl })}
+                </p>
+              </div>
+            )}
+            {!ready && worklets && (
               <div className="absolute inset-0 flex items-center justify-center gap-2 bg-white text-sm text-zinc-500 dark:bg-zinc-900">
                 <Loader2 size={16} className="animate-spin text-pink-500" /> {say('midiEdLoading')}
               </div>

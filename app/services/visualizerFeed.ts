@@ -90,7 +90,16 @@ export interface ReceivedFeed {
 /** Opened by the visualiser window. */
 export async function receiveVisualizerFeed(): Promise<ReceivedFeed> {
   const context = new AudioContext();
-  await context.audioWorklet.addModule('/worklets/pcm-player.js');
+  try {
+    await context.audioWorklet.addModule('/worklets/pcm-player.js');
+  } catch (error) {
+    // same secure-context gate as the MIDI editor's synth (see
+    // audioWorkletsAvailable): name it instead of the TypeError
+    if (!('audioWorklet' in context)) {
+      throw new Error('the visualiser feed needs AudioWorklet, which this browser only exposes on localhost or HTTPS — open the studio on its own computer or through an SSH tunnel instead');
+    }
+    throw error;
+  }
   const player = new AudioWorkletNode(context, 'pcm-player', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
   const mute = context.createGain();
   mute.gain.value = 0;
