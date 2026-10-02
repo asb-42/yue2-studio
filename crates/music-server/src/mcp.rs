@@ -19,6 +19,7 @@ use axum::http::{header, HeaderMap, Method, Request, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
+use axum::extract::ConnectInfo;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -604,14 +605,35 @@ impl Drop for Listening {
 
 /// Only the studio's own page and local agents may drive it: a web page in
 /// the user's browser, or one rebinding a domain to this computer, sends its
-/// own origin and is refused.
-fn local_origin(headers: &HeaderMap) -> bool {
+/// own origin and is refused. The page served to the LAN passes too when the
+/// request comes off this computer: its origin is this service's own address.
+/// Loopback keeps the strict list below even then - a rebinding domain matches
+/// its own Host header as well, and there the network guard lets loopback
+/// through without a key. Off loopback the guard has already demanded the key
+/// from everyone who reaches here.
+fn local_origin(peer: &std::net::SocketAddr, headers: &HeaderMap) -> bool {
     let Some(origin) = headers.get(header::ORIGIN) else { return true };
     let Ok(origin) = origin.to_str() else { return false };
     let Some((scheme, rest)) = origin.split_once("://") else { return false };
     let host = rest.split('/').next().unwrap_or_default();
     let host = if host.starts_with('[') { host.split(']').next().map(|name| format!("{name}]")).unwrap_or_default() } else { host.split(':').next().unwrap_or_default().to_string() };
-    scheme == "tauri" || ["localhost", "127.0.0.1", "[::1]", "tauri.localhost"].contains(&host.as_str())
+    if scheme == "tauri" || ["localhost", "127.0.0.1", "[::1]", "tauri.localhost"].contains(&host.as_str()) {
+        return true;
+    }
+    if peer.ip().is_loopback() {
+        return false;
+    }
+    host_of(headers).is_some_and(|own| own.eq_ignore_ascii_case(&host))
+}
+
+/// The address this service was opened as, without its port.
+fn host_of(headers: &HeaderMap) -> Option<String> {
+    let host = headers.get(header::HOST)?.to_str().ok()?;
+    Some(if host.starts_with('[') {
+        host.split(']').next().map(|name| format!("{name}]")).unwrap_or_default()
+    } else {
+        host.split(':').next().unwrap_or_default().to_string()
+    })
 }
 
 fn foreign_origin() -> Response {
@@ -620,8 +642,8 @@ fn foreign_origin() -> Response {
 
 /// The stream of commands the studio's page executes. Its first message
 /// names the window, so it knows the commands addressed to it.
-pub async fn window_events(headers: HeaderMap) -> Response {
-    if !local_origin(&headers) {
+pub async fn window_events(ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>, headers: HeaderMap) -> Response {
+    if !local_origin(&peer, &headers) {
         return foreign_origin();
     }
     let window = bridge().sequence.fetch_add(1, Ordering::Relaxed);
@@ -650,8 +672,8 @@ pub struct WindowAnswer {
 }
 
 /// The page's answer to one command.
-pub async fn window_result(headers: HeaderMap, Json(answer): Json<WindowAnswer>) -> StatusCode {
-    if !local_origin(&headers) {
+pub async fn window_result(ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>, headers: HeaderMap, Json(answer): Json<WindowAnswer>) -> StatusCode {
+    if !local_origin(&peer, &headers) {
         return StatusCode::FORBIDDEN;
     }
     let waiting = bridge().pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).remove(&answer.id);
@@ -674,8 +696,8 @@ pub struct WindowFocus {
 
 /// The page the person turned to: an agent's command goes there, not to the
 /// window that happened to open last.
-pub async fn window_focus(headers: HeaderMap, Json(focus): Json<WindowFocus>) -> StatusCode {
-    if !local_origin(&headers) {
+pub async fn window_focus(ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>, headers: HeaderMap, Json(focus): Json<WindowFocus>) -> StatusCode {
+    if !local_origin(&peer, &headers) {
         return StatusCode::FORBIDDEN;
     }
     if focus_window(focus.window) { StatusCode::NO_CONTENT } else { StatusCode::NOT_FOUND }
@@ -2410,8 +2432,8 @@ fn tool_title(name: &str) -> String {
     letters.next().map(|first| first.to_uppercase().chain(letters).collect()).unwrap_or_default()
 }
 
-pub async fn handle(headers: HeaderMap, body: axum::body::Bytes) -> Response {
-    if !local_origin(&headers) {
+pub async fn handle(ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
+    if !local_origin(&peer, &headers) {
         return foreign_origin();
     }
     let Ok(message) = serde_json::from_slice::<Value>(&body) else {
@@ -2632,9 +2654,43 @@ mod tests {
         assert!(!notices.contains(&json!({ "changed": "library_songs_list" })));
     }
 
+    /// The window bridge's origin rule: the page served to the LAN passes
+    /// off loopback, where the network key guard has already vetted everyone;
+    /// on loopback only localhost names and the shell pass, because a
+    /// rebinding domain matches its own Host header too and there the guard
+    /// lets loopback through without a key.
     #[test]
-    fn a_command_goes_to_the_window_the_person_turned_to() {
-        let (older, newer) = (u64::MAX - 20, u64::MAX - 21);
+    fn the_bridge_trusts_the_served_page_but_no_rebinding() {
+        use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+        let peer = |ip: [u8; 4], port: u16| SocketAddr::new(IpAddr::V4(Ipv4Addr::from(ip)), port);
+        let headers = |origin: Option<&str>, host: &str| {
+            let mut headers = HeaderMap::new();
+            if let Some(origin) = origin {
+                headers.insert(header::ORIGIN, origin.parse().unwrap());
+            }
+            headers.insert(header::HOST, host.parse().unwrap());
+            headers
+        };
+        let lan = peer([192, 168, 178, 50], 8791);
+        let lan_page = || headers(Some("https://192.168.178.50:8792"), "192.168.178.50:8792");
+        // no origin at all (same-origin GET, local agents): always welcome
+        assert!(local_origin(&lan, &headers(None, "192.168.178.50:8792")));
+        // the served LAN page, off loopback: welcome (guard demanded the key)
+        assert!(local_origin(&lan, &lan_page()));
+        // localhost and the shell: welcome everywhere
+        for origin in ["http://localhost:8791", "http://127.0.0.1:8791", "tauri://localhost"] {
+            assert!(local_origin(&lan, &headers(Some(origin), "192.168.178.50:8792")), "{origin}");
+        }
+        // another website, wherever it is reached from: never
+        assert!(!local_origin(&lan, &headers(Some("https://evil.example"), "192.168.178.50:8792")));
+        assert!(!local_origin(&peer([127, 0, 0, 1], 8791), &headers(Some("https://evil.example"), "127.0.0.1:8791")));
+        // a domain rebound to loopback matches its own Host header, and there
+        // the guard passes loopback without a key: still refused
+        assert!(!local_origin(&peer([127, 0, 0, 1], 8791), &headers(Some("http://evil.example:8791"), "evil.example:8791")));
+    }
+
+    #[test]
+    fn a_command_goes_to_the_window_the_person_turned_to() {        let (older, newer) = (u64::MAX - 20, u64::MAX - 21);
         open_windows().extend([older, newer]);
         let place = |window: u64| open_windows().iter().position(|open| *open == window).unwrap();
         assert!(place(newer) > place(older), "the window opened last is asked first");
@@ -2827,12 +2883,14 @@ mod tests {
 
     #[test]
     fn only_local_pages_and_agents_may_drive_the_studio() {
+        use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+        let home = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8791);
         let from = |origin: &str| {
             let mut headers = HeaderMap::new();
             headers.insert(header::ORIGIN, origin.parse().unwrap());
-            local_origin(&headers)
+            local_origin(&home, &headers)
         };
-        assert!(local_origin(&HeaderMap::new()), "an agent sends no origin");
+        assert!(local_origin(&home, &HeaderMap::new()), "an agent sends no origin");
         assert!(from("http://127.0.0.1:3791") && from("http://localhost") && from("http://tauri.localhost") && from("tauri://localhost") && from("http://[::1]:8791"));
         assert!(!from("https://example.com") && !from("http://127.0.0.1.evil.com") && !from("null"));
     }
@@ -2871,7 +2929,12 @@ mod tests {
                 map.insert(axum::http::HeaderName::from_bytes(name.as_bytes()).unwrap(), value.parse().unwrap());
             }
             async move {
-                let response = handle(map, axum::body::Bytes::from(body.to_string())).await;
+                let response = handle(
+                    ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 8791))),
+                    map,
+                    axum::body::Bytes::from(body.to_string()),
+                )
+                .await;
                 let status = response.status();
                 let bytes = axum::body::to_bytes(response.into_body(), 1 << 22).await.unwrap();
                 (status, serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null))
@@ -2914,7 +2977,12 @@ mod tests {
     #[tokio::test]
     async fn the_server_introduces_itself_and_lists_its_tools() {
         let reply = |body: Value| async move {
-            let response = handle(HeaderMap::new(), axum::body::Bytes::from(body.to_string())).await;
+            let response = handle(
+                ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 8791))),
+                HeaderMap::new(),
+                axum::body::Bytes::from(body.to_string()),
+            )
+            .await;
             let bytes = axum::body::to_bytes(response.into_body(), 1 << 22).await.unwrap();
             serde_json::from_slice::<Value>(&bytes).unwrap()
         };
