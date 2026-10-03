@@ -234,6 +234,7 @@ Files: `crates/music-server/src/training.rs:316-457`, `crates/music-server/src/m
   - [ ] (b) v1-drop with clean “not available on Linux” status (training already reports `pack_status`/`pack_ready`; MIDI reports `tool_installed`; keep those honest).
 - [x] Linux `ace-train`/`ace-caption` builds (DONE 2026-10-03): scripts written, all three built + verified (`--help`, clean `ldd`); `run-linux.sh` auto-discovers sidecars via `YUE_*_BIN`.
 - [x] FIRST LINUX LORA (DONE 2026-10-03): 5-song jazz-duet dataset from the user's library → `fast` run, 100/100 steps, loss 4.8→~3.4, 10 checkpoints → step-100 installed as `jazz-duet-1 · 100` (trigger `jzzdt`) → test song generated with it applied (ar/nar 0.8).
+- [x] Style by ear (DONE 2026-10-03): 10.5 GB listen pack (MOSS audio+LM, Beat This!) downloaded; `describe-style` on the user's jazz duet heard genre/caption/93 BPM and wrote a contract-ordered style line in 100 s.
 - [ ] If building: add `scripts/build-train-runtime.sh`, `scripts/build-midi-runtime.sh` (ports of `build-train-runtime.ps1`, `build-midi-editor.ps1` analogues), publish `*-linux-x64` assets, extend `pack()`/`listen_pack()`/`tool_asset()` URL tables with per-OS selection (keep Windows entries for upstream merges).
 - [ ] `YUE_TRAIN_BIN` / `YUE_CAPTION_BIN` / `YUE_MIDI_BIN` env overrides (`training.rs:500-518`, `midi.rs:129-133`) already enable dev builds — keep; they are the Linux dev path before release assets exist.
 - [ ] `CAPTIONER_PICK` DLL list (`training.rs:383-396`) → Linux `.so` list if captioner is built.
