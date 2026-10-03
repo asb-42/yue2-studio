@@ -1,6 +1,10 @@
 target/
 node_modules/
 dist/
+# The studio's live data root when kept beside the checkout (models, library,
+# media, settings, logs, downloads): portable as one folder with the repo,
+# never committed.
+workdir/
 # ...except the waveform editor's own bundle, which is shipped, not built.
 !app/public/editor/dist/
 !app/public/editor/dist/**
