@@ -2291,6 +2291,11 @@ async fn install_training_pack(State(state): State<AppState>) -> Result<Json<Val
     if let Some(refusal) = trainer_card_refusal() {
         return Err(api_error(StatusCode::CONFLICT, refusal));
     }
+    // On Linux a pending Windows trainer would fail invisibly in the
+    // background task below; refuse up front so the panel says why.
+    if let Some(blocked) = state.training.pack_blocked() {
+        return Err(api_error(StatusCode::BAD_REQUEST, blocked));
+    }
     let background = state.clone();
     tokio::spawn(async move {
         if let Err(error) = background.training.install_pack().await {
@@ -2308,8 +2313,12 @@ async fn install_training_pack(State(state): State<AppState>) -> Result<Json<Val
 
 /// The optional listening pack, and the ONNX Runtime its tempo model runs
 /// on when nothing else has brought it yet.
-async fn install_listen_pack(State(state): State<AppState>) -> Json<Value> {
-    let background = state.clone();
+async fn install_listen_pack(State(state): State<AppState>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    // As in install_training_pack: a pending Windows captioner fails
+    // invisibly in the background task, so refuse up front instead.
+    if let Some(blocked) = state.training.listen_blocked() {
+        return Err(api_error(StatusCode::BAD_REQUEST, blocked));
+    }    let background = state.clone();
     tokio::spawn(async move {
         if let Err(error) = background.training.install_listen().await {
             eprintln!("[ERROR] listening pack: {error:#}");
@@ -2322,7 +2331,7 @@ async fn install_listen_pack(State(state): State<AppState>) -> Json<Value> {
             }
         }
     });
-    Json(serde_json::json!({ "started": true }))
+    Ok(Json(serde_json::json!({ "started": true })))
 }
 
 async fn cancel_training_pack(State(state): State<AppState>) -> Json<Value> {
@@ -5908,6 +5917,13 @@ async fn install_midi(State(state): State<AppState>, Json(input): Json<MidiSizeR
     let missing = state.midi.missing(size);
     if missing.is_empty() {
         return Ok(Json(serde_json::json!({ "installed": true, "size": size.id })));
+    }
+    // On Linux a pending Windows transcriber would fail invisibly in the
+    // background task below (a native build behind YUE_MIDI_BIN counts as
+    // installed, so its weights still fetch); refuse up front instead.
+    #[cfg(not(windows))]
+    if let Some(refused) = missing.iter().find(|asset| crate::downloads::is_windows_binary_asset(asset)) {
+        return Err(api_error(StatusCode::BAD_REQUEST, crate::downloads::windows_only_refusal(refused.label)));
     }
     let transcriber = state.midi.clone();
     tokio::spawn(async move {

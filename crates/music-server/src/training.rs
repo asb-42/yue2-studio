@@ -544,6 +544,21 @@ impl Training {
         listen_pack().iter().all(|asset| self.listen_installed(asset))
     }
 
+    /// As `pack_blocked`, for the listening pack (`YUE_CAPTION_BIN` is its
+    /// native-captioner escape hatch). Always `None` on Windows.
+    pub fn listen_blocked(&self) -> Option<String> {
+        #[cfg(windows)]
+        {
+            return None;
+        }
+        #[cfg(not(windows))]
+        return listen_pack()
+            .iter()
+            .filter(|asset| !self.listen_installed(asset))
+            .find(|asset| crate::downloads::is_windows_binary_asset(asset))
+            .map(|asset| crate::downloads::windows_only_refusal(asset.label));
+    }
+
     pub async fn install_listen(&self) -> Result<()> {
         let missing: Vec<&'static Asset> = listen_pack().iter().filter(|asset| !self.listen_installed(asset)).collect();
         if missing.is_empty() {
@@ -613,6 +628,24 @@ impl Training {
 
     pub fn pack_ready(&self) -> bool {
         pack().iter().all(|asset| self.installed(asset))
+    }
+
+    /// Why the training pack cannot install on Linux, if that is why: a
+    /// pending Windows executable. `None` means install away (or everything
+    /// is already there). Only pending assets count — a native trainer behind
+    /// `YUE_TRAIN_BIN` counts as installed, so its weights still fetch.
+    /// Always `None` on Windows, where the executables are at home.
+    pub fn pack_blocked(&self) -> Option<String> {
+        #[cfg(windows)]
+        {
+            return None;
+        }
+        #[cfg(not(windows))]
+        return pack()
+            .iter()
+            .filter(|asset| !self.installed(asset))
+            .find(|asset| crate::downloads::is_windows_binary_asset(asset))
+            .map(|asset| crate::downloads::windows_only_refusal(asset.label));
     }
 
     pub async fn install_pack(&self) -> Result<()> {
@@ -1556,6 +1589,27 @@ mod tests {
         assert_eq!(trainer_device("x\n[Load] YuE2 backend: CUDA0 (shared)\nstep 1"), Some("CUDA0".into()));
         assert_eq!(trainer_device("[Load] DiT backend: CPU (CPU threads: 16)"), Some("CPU".into()));
         assert_eq!(trainer_device("nothing yet"), None);
+    }
+
+    /// The Windows-only packs refuse up front on Linux instead of failing
+    /// invisibly in a background download — unless a native build behind the
+    /// environment override counts as installed, in which case only weights
+    /// are missing and nothing is blocked.
+    #[test]
+    #[cfg(not(windows))]
+    fn windows_only_packs_say_so_before_downloading() {
+        let root = std::env::temp_dir().join(format!("training-blocked-{}", uuid::Uuid::now_v7()));
+        let training = Training::new(&root, "yue2-cpp");
+        assert!(training.pack_blocked().is_some(), "the trainer exe is pending");
+        assert!(training.listen_blocked().is_some(), "the captioner exe is pending");
+        // a native trainer behind the override unblocks the weights
+        let fake = root.join("music-train");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&fake, b"x").unwrap();
+        unsafe { std::env::set_var("YUE_TRAIN_BIN", &fake) };
+        assert!(training.pack_blocked().is_none(), "a native trainer unblocks the pack");
+        unsafe { std::env::remove_var("YUE_TRAIN_BIN") };
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

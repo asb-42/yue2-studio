@@ -267,10 +267,7 @@ impl Downloader {
         // byte moves, naming the asset so the panel can say why.
         #[cfg(not(windows))]
         if let Some(refused) = pending.iter().find(|asset| is_windows_binary_asset(asset)) {
-            bail!(
-                "{} is a Windows-only download and cannot run on Linux; build it from the pinned sources or point the matching *_BIN override (YUE_TRAIN_BIN, YUE_CAPTION_BIN, YUE_MIDI_BIN, MUSIC_VST_HOST_BIN) at a native build",
-                refused.label
-            );
+            bail!(windows_only_refusal(refused.label));
         }
 
         let total: u64 = pending.iter().map(|asset| asset.bytes).sum();
@@ -398,10 +395,7 @@ impl Downloader {
         // As in install_all: Windows machine code never lands on Linux.
         #[cfg(not(windows))]
         if is_windows_binary_asset(asset) {
-            bail!(
-                "{} is a Windows-only download and cannot run on Linux; build it from the pinned sources or point the matching *_BIN override (YUE_TRAIN_BIN, YUE_CAPTION_BIN, YUE_MIDI_BIN, MUSIC_VST_HOST_BIN) at a native build",
-                asset.label
-            );
+            bail!(windows_only_refusal(asset.label));
         }
         {
             let mut progress = self.progress.lock().await;
@@ -596,6 +590,15 @@ fn extract_named_local(archive: &Path, wanted: &[&str], destination: &Path) -> R
 pub fn is_windows_binary_asset(asset: &Asset) -> bool {
     let marker = asset.marker.to_ascii_lowercase();
     marker.ends_with(".exe") || marker.ends_with(".dll")
+}
+
+/// Why a Windows binary is refused on Linux, naming the asset and the way
+/// out. Shared by the installer gates and the endpoints that answer before
+/// a background task could fail invisibly.
+pub fn windows_only_refusal(label: &str) -> String {
+    format!(
+        "{label} is a Windows-only download and cannot run on Linux; build it from the pinned sources or point the matching *_BIN override (YUE_TRAIN_BIN, YUE_CAPTION_BIN, YUE_MIDI_BIN, MUSIC_VST_HOST_BIN) at a native build"
+    )
 }
 
 /// The file a picked archive entry lands as: its base name.
