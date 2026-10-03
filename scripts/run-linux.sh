@@ -42,6 +42,11 @@ export YUE_ENGINE_BASE_URL="${YUE_ENGINE_BASE_URL:-http://$YUE_ENGINE_HOST:$YUE_
 if [ -z "${YUE_ENGINE_ROOT:-}" ] && [ -z "${YUE_ENGINE_BIN:-}" ] && [ -x "$REPO_ROOT/dist/yue2-cpp/yue-server" ]; then
   export YUE_ENGINE_ROOT="$REPO_ROOT/dist/yue2-cpp"
 fi
+# Same for the HOT-Step sidecars (see build-train-runtime.sh): native builds
+# count as installed, so only their weights still download.
+[ -z "${YUE_TRAIN_BIN:-}" ] && [ -x "$REPO_ROOT/dist/music-train/ace-train" ] && export YUE_TRAIN_BIN="$REPO_ROOT/dist/music-train/ace-train"
+[ -z "${YUE_CAPTION_BIN:-}" ] && [ -x "$REPO_ROOT/dist/ace-caption/ace-caption" ] && export YUE_CAPTION_BIN="$REPO_ROOT/dist/ace-caption/ace-caption"
+[ -z "${YUE_MIDI_BIN:-}" ] && [ -x "$REPO_ROOT/dist/music-midi/ace-midi" ] && export YUE_MIDI_BIN="$REPO_ROOT/dist/music-midi/ace-midi"
 
 # A Linux engine needs the system CUDA toolkit on the loader path; without it
 # the CUDA backend fails to load and Auto falls through to Vulkan/CPU.

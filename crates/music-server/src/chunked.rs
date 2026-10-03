@@ -56,6 +56,14 @@ fn connections() -> &'static tokio::sync::Semaphore {
 /// on a twelve gigabyte file - seven hundred pieces - and a retry is cheap.
 const RETRIES: u32 = 8;
 
+/// How long one body stream may go without delivering a byte before it counts
+/// as dead. A connection Hugging Face stops feeding but never closes sat a
+/// worker in `stream.next().await` for the rest of the session: no error, no
+/// progress, and the manifest kept what had arrived while nothing more ever
+/// did. A live stream delivers chunks constantly, so two quiet minutes is
+/// dead, and the piece retries like any other failure.
+const STREAM_IDLE: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// How long a download may spend waiting to be let in before it gives up.
 ///
 /// "Too many requests" is not a failure, it is a queue, and it must not count
@@ -403,13 +411,20 @@ async fn once(
     }
     let mut stream = response.bytes_stream();
     let mut offset = start;
-    while let Some(chunk) = stream.next().await {
+    loop {
         // Checked here and not only between pieces: four sixteen megabyte
         // pieces in flight is ten seconds of downloading after the user has
-        // pressed stop, which reads as a button that did nothing.
+        // pressed stop, which reads as a button that does nothing.
         if stop.load(Ordering::Relaxed) {
             bail!("cancelled");
         }
+        let next = tokio::time::timeout(STREAM_IDLE, stream.next()).await;
+        let Some(chunk) = (match next {
+            Err(_) => bail!("range {start}-{end}: no bytes for {} s, retrying", STREAM_IDLE.as_secs()),
+            Ok(chunk) => chunk,
+        }) else {
+            break;
+        };
         let chunk = chunk.context("read range")?;
         let mut placed = 0usize;
         while placed < chunk.len() {

@@ -229,9 +229,11 @@ Verification:
 Files: `crates/music-server/src/training.rs:316-457`, `crates/music-server/src/midi.rs:28-86`, `engines/music-train-source.json`, `engines/music-midi-source.json`, `crates/music-engine/src/yue_train.rs`.
 
 - [ ] All three are Windows-only release zips today: `music-train-cuda-windows-x64.zip` (`shipped_as: music-train.exe`), `music-midi-cuda-windows-x64.zip` (`music-midi.exe`), `ace-caption-windows-x64.zip` (`ace-caption.exe` + `ggml*.dll` pick list at `training.rs:379-396`).
-- [ ] For each, choose BUILD or DROP for v1 (record in this file):
-  - [ ] (a) Build Linux binaries from pinned HOT-Step-CPP commits (`music-train-source.json:repository/commit`, `music-midi-source.json`) with CUDA arches matching §4 (`music-midi-source.json:11` already lists `75-real;80-real;86-real;89-real;90-real;120a-real;120-virtual`).
+- [x] For each, choose BUILD or DROP for v1 (DECIDED 2026-10-03: BUILD — user asked for training flexibility):
+  - [x] (a) Build Linux binaries from pinned HOT-Step-CPP commits (`music-train-source.json:repository/commit`, `music-midi-source.json`) with CUDA arches matching §4 (`music-midi-source.json:11` already lists `75-real;80-real;86-real;89-real;90-real;120a-real;120-virtual`).
   - [ ] (b) v1-drop with clean “not available on Linux” status (training already reports `pack_status`/`pack_ready`; MIDI reports `tool_installed`; keep those honest).
+- [x] Linux `ace-train`/`ace-caption` builds (DONE 2026-10-03): scripts written, all three built + verified (`--help`, clean `ldd`); `run-linux.sh` auto-discovers sidecars via `YUE_*_BIN`.
+- [x] FIRST LINUX LORA (DONE 2026-10-03): 5-song jazz-duet dataset from the user's library → `fast` run, 100/100 steps, loss 4.8→~3.4, 10 checkpoints → step-100 installed as `jazz-duet-1 · 100` (trigger `jzzdt`) → test song generated with it applied (ar/nar 0.8).
 - [ ] If building: add `scripts/build-train-runtime.sh`, `scripts/build-midi-runtime.sh` (ports of `build-train-runtime.ps1`, `build-midi-editor.ps1` analogues), publish `*-linux-x64` assets, extend `pack()`/`listen_pack()`/`tool_asset()` URL tables with per-OS selection (keep Windows entries for upstream merges).
 - [ ] `YUE_TRAIN_BIN` / `YUE_CAPTION_BIN` / `YUE_MIDI_BIN` env overrides (`training.rs:500-518`, `midi.rs:129-133`) already enable dev builds — keep; they are the Linux dev path before release assets exist.
 - [ ] `CAPTIONER_PICK` DLL list (`training.rs:383-396`) → Linux `.so` list if captioner is built.
