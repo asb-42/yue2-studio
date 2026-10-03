@@ -15,7 +15,8 @@ lives at **[timoncool/YuE2-Studio](https://github.com/timoncool/YuE2-Studio)** â
 start there for the Windows installer, the project page, and the samples.
 Everything below describes only what this fork changes.
 
-[![License](https://img.shields.io/github/license/timoncool/YuE2-Studio?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/github/license/asb-42/yue2-studio?style=flat-square)](LICENSE)
+[![CI](https://github.com/asb-42/yue2-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/asb-42/yue2-studio/actions)
 
 </div>
 

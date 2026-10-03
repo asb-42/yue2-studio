@@ -13,12 +13,11 @@ For an agent given this repository: build the service (`cargo build --release -p
 
 ## Docs
 
-- [Agent skill](https://raw.githubusercontent.com/timoncool/YuE2-Studio/main/docs/mcp-skill.md): every tool by area, the model's writing rules, step-by-step recipes (the same text the server serves as `studio://skill`)
-- [README](https://github.com/timoncool/YuE2-Studio#readme): what the studio does, what it needs, models and where they go
-- [Latest release](https://github.com/timoncool/YuE2-Studio/releases/latest): the installer and the portable archive
-- [Project page](https://timoncool.github.io/YuE2-Studio/)
+- [Agent skill](https://raw.githubusercontent.com/asb-42/yue2-studio/main/docs/mcp-skill.md): every tool by area, the model's writing rules, step-by-step recipes (the same text the server serves as `studio://skill`)
+- [README](https://github.com/asb-42/yue2-studio#readme): what the studio does, what it needs, models and where they go
+- [Latest release](https://github.com/asb-42/yue2-studio/releases): Linux tarballs (no installer; see README)
 
 ## Optional
 
-- Install the skill for Claude Code: save [docs/mcp-skill.md](https://raw.githubusercontent.com/timoncool/YuE2-Studio/main/docs/mcp-skill.md) as `~/.claude/skills/yue2-studio/SKILL.md`
-- [CHANGELOG](https://github.com/timoncool/YuE2-Studio/blob/main/CHANGELOG.md)
+- Install the skill for Claude Code: save [docs/mcp-skill.md](https://raw.githubusercontent.com/asb-42/yue2-studio/main/docs/mcp-skill.md) as `~/.claude/skills/yue2-studio/SKILL.md`
+- [CHANGELOG](https://github.com/asb-42/yue2-studio/blob/main/CHANGELOG.md)
