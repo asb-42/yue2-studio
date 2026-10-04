@@ -975,6 +975,13 @@ pub async fn serve() -> anyhow::Result<()> {
             // a startup that is failing, and repeating "stopped answering" every
             // two seconds is what filled a whole log with one sentence.
             let mut was_running = false;
+            // Consecutive quiet deaths on one device. A quiet log is no
+            // evidence, so one means nothing - but three in a row is a device
+            // that keeps dying without a word (a card lost under the driver).
+            let mut silent_streak: u32 = 0;
+            // Whether the busy episode was already named, so a render that
+            // takes an hour says so once instead of every two seconds.
+            let mut busy_noted = false;
             loop {
                 let ready = state.model_manager.status(effective_install_target(&state).await).await.ready;
                 let running = state.music_server.health().await;
@@ -982,7 +989,11 @@ pub async fn serve() -> anyhow::Result<()> {
                 // holding it is left alone, and the engine comes back after
                 let preparing = state.prepare.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref().is_some_and(|job| !job.finished);
                 let card_taken = preparing || state.training.active_run().await.is_some();
-                if ready && !running && !card_taken {
+                // Health is a full answer on a timer, which a render in
+                // flight starves while the listener still accepts. Only a
+                // refused connection is gone.
+                let alive = if running { true } else { state.music_server.accepting().await };
+                if ready && !running && !card_taken && !alive {
                     if was_running {
                         // It was answering and now it is not: the one line that
                         // explains a log which suddenly starts again from
@@ -990,13 +1001,35 @@ pub async fn serve() -> anyhow::Result<()> {
                         music_engine::yue_server::note_in_log("the engine stopped answering; restarting it");
                         // Under Auto a device that died of its own fault is
                         // not tried again: the restart moves down the chain.
+                        // Quiet is graded, not convicted: only demonstrated
+                        // device faults, or three quiet deaths running,
+                        // retire a device for this session.
                         let auto = state.engine_options.read().await.backend == music_engine::yue_server::ComputeBackend::Auto;
                         let active = *state.active_device.read().await;
                         if let Some(device) = active.filter(|device| auto && *device != music_engine::yue_server::ComputeBackend::Cpu) {
                             let log = last_run_log().to_lowercase();
-                            if describes_device_failure(&log) || died_silently(&log) {
+                            if describes_device_failure(&log) {
                                 music_engine::yue_server::note_in_log(&format!("{} failed on this machine; leaving it for this session", device_name(device)));
                                 state.failed_devices.write().await.push(device);
+                                silent_streak = 0;
+                            } else if died_silently(&log) {
+                                silent_streak += 1;
+                                if silent_streak >= 3 {
+                                    music_engine::yue_server::note_in_log(&format!(
+                                        "{} died quietly {} times running; leaving it for this session",
+                                        device_name(device),
+                                        silent_streak
+                                    ));
+                                    state.failed_devices.write().await.push(device);
+                                    silent_streak = 0;
+                                } else {
+                                    music_engine::yue_server::note_in_log(&format!(
+                                        "{} died quietly ({silent_streak}/3); retrying the same device",
+                                        device_name(device)
+                                    ));
+                                }
+                            } else {
+                                silent_streak = 0;
                             }
                         }
                     }
@@ -1012,9 +1045,16 @@ pub async fn serve() -> anyhow::Result<()> {
                             }
                         }
                     }
+                    busy_noted = false;
+                } else if ready && !running && !card_taken && alive && was_running && !busy_noted {
+                    music_engine::yue_server::note_in_log("the engine is busy rendering and not answering health checks; leaving it alone");
+                    busy_noted = true;
+                } else if running {
+                    busy_noted = false;
+                    silent_streak = 0;
                 }
-                was_running = running;
-                tokio::time::sleep(std::time::Duration::from_secs(if running { 5 } else { 2 })).await;
+                was_running = alive;
+                tokio::time::sleep(std::time::Duration::from_secs(if alive { 5 } else { 2 })).await;
             }
         });
     }
@@ -7572,6 +7612,24 @@ impl EngineClient {
             .unwrap_or(false);
         *self.health_cache.lock().expect("health cache") = Some((std::time::Instant::now(), up));
         up
+    }
+
+    /// Whether the engine's listener accepts connections at all. Health above
+    /// is a full answer on a timer, which a render in flight starves: a busy
+    /// single-threaded server still completes handshakes into the kernel
+    /// backlog. Refused means gone; accepted means alive, however quiet.
+    async fn accepting(&self) -> bool {
+        let address: Option<std::net::SocketAddr> = self
+            .base_url
+            .trim_start_matches("http://")
+            .trim_start_matches("https://")
+            .split('/')
+            .next()
+            .and_then(|authority| authority.parse().ok());
+        let Some(address) = address else { return false };
+        tokio::time::timeout(std::time::Duration::from_millis(500), tokio::net::TcpStream::connect(address))
+            .await
+            .is_ok_and(|connected| connected.is_ok())
     }
 
     async fn props(&self) -> anyhow::Result<Value> {
