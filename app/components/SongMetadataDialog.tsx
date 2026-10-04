@@ -114,7 +114,9 @@ export const SongMetadataDialog: React.FC<{ song: Song; onClose: () => void; onS
   const input = 'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-white/15 dark:bg-black/30 dark:text-white';
 
   return createPortal(
-    <div className="fixed inset-0 z-70 flex items-center justify-center bg-black/60 p-2 sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    // Clicks bubble through the React tree, not the DOM tree: without this
+    // stop they reach the song row this menu hangs off and start playback.
+    <div className="fixed inset-0 z-70 flex items-center justify-center bg-black/60 p-2 sm:p-4" onClick={(event) => event.stopPropagation()} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div role="dialog" aria-modal="true" aria-label={t('songMetaTitle')} className="flex max-h-[92vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-zinc-900">
         <div className="flex items-center gap-2 border-b border-zinc-200 px-4 py-3 dark:border-white/10 sm:px-5">
           <h3 className="min-w-0 flex-1 truncate text-base font-bold text-zinc-900 dark:text-white">{t('songMetaTitle')}</h3>

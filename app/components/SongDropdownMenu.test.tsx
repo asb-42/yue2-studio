@@ -11,15 +11,40 @@ vi.mock('../context/SongActionsContext', () => ({
   ownsSong: () => true,
 }));
 vi.mock('../services/studioQueries', () => ({ useKaraokeStatus: () => ({ data: null }) }));
-vi.mock('./SongMetadataDialog', () => ({
-  SongMetadataDialog: () => (
-    <div role="dialog">
-      <input aria-label="title" defaultValue="x" />
-    </div>
-  ),
-}));
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+const rawSong = {
+  title: 'T',
+  caption: 'pop',
+  lyrics: '[Verse]\nx',
+  metadata: {},
+  audio_path: null,
+  source: 'local_generation',
+  engine_id: 'e',
+  created_at: '1',
+  updated_at: '2',
+};
+
+function stubFetch() {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({ ok: true, json: async () => rawSong })),
+  );
+}
+
+async function settle() {
+  await act(async () => {});
+}
+
+async function fieldOfDialog(): Promise<HTMLInputElement | null> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await settle();
+    const field = document.querySelector('[role="dialog"] input') as HTMLInputElement | null;
+    if (field) return field;
+  }
+  return null;
+}
 
 const song = { id: 's1', title: 'T', audioUrl: '/a.mp3', lyrics: '[Verse]\nx', style: 'pop' } as Song;
 
@@ -44,24 +69,27 @@ afterEach(() => {
   act(() => root?.unmount());
   host?.remove();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('song menu metadata dialog', () => {
-  it('opens on the first click and survives the menu closing', () => {
+  it('opens on the first click and survives the menu closing', async () => {
+    stubFetch();
     let open = true;
     const onClose = () => {
       open = false;
       rerender(open, onClose);
     };
     mount(open, onClose);
-    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
     clickEditMetadata();
     // the menu closed itself, like handleAction does; the dialog stays
     expect(open).toBe(false);
-    expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
   });
 
-  it('clicks inside the dialog do not close it', () => {
+  it('clicks inside the dialog do not close it', async () => {
+    stubFetch();
     let open = true;
     const onClose = () => {
       open = false;
@@ -69,13 +97,39 @@ describe('song menu metadata dialog', () => {
     };
     mount(open, onClose);
     clickEditMetadata();
-    const field = host.querySelector('[role="dialog"] input') as HTMLInputElement;
+    const field = await fieldOfDialog();
     expect(field).not.toBeNull();
     act(() => {
-      field.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-      field.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      field.focus();
+      field!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      field!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      field!.focus();
     });
-    expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  it('clicks inside the dialog do not reach the song row behind it', async () => {
+    stubFetch();
+    let plays = 0;
+    function RowHarness() {
+      const [open, setOpen] = React.useState(true);
+      return (
+        <div onClick={() => { plays += 1; }}>
+          <SongDropdownMenu song={song} isOpen={open} onClose={() => setOpen(false)} position="right" direction="down" />
+        </div>
+      );
+    }
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    // the library row: any bubbled click starts playback
+    act(() => {
+      root.render(<RowHarness />);
+    });
+    clickEditMetadata();
+    const field = await fieldOfDialog();
+    expect(field).not.toBeNull();
+    act(() => (field as HTMLInputElement).click());
+    expect(plays).toBe(0);
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
   });
 });
