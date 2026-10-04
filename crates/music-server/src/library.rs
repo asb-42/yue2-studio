@@ -366,10 +366,14 @@ fn merged_metadata(stored:&serde_json::Value,edit:serde_json::Value)->serde_json
   match stored.get(key){Some(value)=>{edit.insert(key.into(),value.clone());}None=>{edit.remove(key);}}
  }
  for(key,value)in stored{edit.entry(key.clone()).or_insert_with(||value.clone());}
+ // An explicit null clears a field (clearing the artist box must stick);
+ // stored keys otherwise survive a partial edit.
+ let dead:Vec<String>=edit.iter().filter_map(|(key,value)|(!OWN_ROUTE.contains(&key.as_str())&&value.is_null()).then(||key.clone())).collect();
+ for key in dead{edit.remove(&key);}
  serde_json::Value::Object(edit)
 }
 fn row_song(r:&rusqlite::Row)->rusqlite::Result<Song>{Ok(Song{id:r.get(0)?,title:r.get(1)?,audio_path:r.get(2)?,caption:r.get(3)?,lyrics:r.get(4)?,metadata:json(r.get::<_,String>(5)?),generation_settings:json(r.get::<_,String>(6)?),engine_id:r.get(7)?,profile_id:r.get(8)?,replay_request:r.get::<_,Option<String>>(9)?.map(json),audio_codes:r.get::<_,Option<String>>(10)?.map(json),source:r.get(11)?,created_at:r.get(12)?,updated_at:r.get(13)?})}fn json(s:String)->serde_json::Value{serde_json::from_str(&s).unwrap_or(serde_json::Value::Null)}fn playlist(c:&Connection,r:&rusqlite::Row)->rusqlite::Result<Playlist>{let id:String=r.get(0)?;let mut q=c.prepare("SELECT song_id FROM playlist_songs WHERE playlist_id=? ORDER BY position")?;let song_ids=q.query_map([&id],|x|x.get(0))?.collect::<rusqlite::Result<_>>()?;Ok(Playlist{id,name:r.get(1)?,description:r.get(2)?,song_ids,created_at:r.get(3)?,updated_at:r.get(4)?})}fn now()->String{std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs().to_string()}
-#[cfg(test)]mod tests{use super::*;#[test]fn a_structured_caption_does_not_become_a_title_of_headings(){
+#[cfg(test)]mod tests{use super::*;#[test]fn an_explicit_null_clears_a_field_but_never_a_like(){let stored=serde_json::json!({"artist":"Old","seed":1,"liked":true,"liked_at":"2"});let cleared=merged_metadata(&stored,serde_json::json!({"artist":null}));assert!(cleared.get("artist").is_none());assert_eq!(cleared.get("seed").unwrap(),1);assert_eq!(cleared.get("liked").unwrap(),true);let kept=merged_metadata(&stored,serde_json::json!({"title":"x"}));assert_eq!(kept.get("artist").unwrap(),"Old");}#[test]fn a_structured_caption_does_not_become_a_title_of_headings(){
   let caption="Global Metadata
 Basic Attributes: bpm is 118. key is F# minor, and scale is minor. Darkwave, Synth-pop. Global Emotional Progression: haunting.";
   assert_eq!(generated_title(caption),"Darkwave, Synth-pop");

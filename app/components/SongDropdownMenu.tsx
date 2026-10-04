@@ -7,6 +7,7 @@ import { isLocalService, openExternal } from '../services/externalLinks';
 import { apiUrl } from '../services/apiBase';
 import { downloadSongAudio } from '../services/songDownload';
 import { openMidi, openStems } from '../services/openStems';
+import { SongMetadataDialog } from './SongMetadataDialog';
 import { useAuth } from '../context/AuthContext';
 import { ownsSong, useSongActions } from '../context/SongActionsContext';
 import { stemOf } from '../services/songStems';
@@ -20,6 +21,7 @@ import {
     Trash2,
     Loader2,
     Mic2,
+    Pencil,
     Play,
     Scissors,
     FileMusic,
@@ -154,6 +156,7 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
         return () => watch.disconnect();
     }, [isOpen, direction]);
     const { ready: karaokeReady, busy: karaokeBusy, make: makeKaraoke, failed: karaokeFailed } = useKaraoke(song, actions.update);
+    const [metaOpen, setMetaOpen] = useState(false);
 
     // A library track in the studio computer's own player (VLC, mpv, ...):
     // the Linux replacement for handing playback to a desktop player.
@@ -338,6 +341,11 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
                 label={t('download')}
                 onClick={handleDownload}
             />
+            <MenuItem
+                icon={<Pencil size={14} />}
+                label={t('songMetaEdit')}
+                onClick={() => handleAction(() => setMetaOpen(true))}
+            />
             {isLocalService() && song.audioUrl && (
                 <MenuItem
                     icon={playBusy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
@@ -360,6 +368,7 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
                     />
                 </>
             )}
+            {metaOpen && <SongMetadataDialog song={song} onClose={() => setMetaOpen(false)} onSaved={(updated) => actions.update?.(updated)} />}
         </div>
     );
 };
