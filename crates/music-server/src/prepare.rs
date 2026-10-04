@@ -1046,7 +1046,14 @@ async fn write_style(state: &AppState, heard: &listen::Heard, facts: &audio_fact
             .await
             .map_err(|(_, Json(error))| error.error)?;
         let caption = listen::normalize_yue2(&content, facts.bpm);
-        let issues = listen::validate_yue2(&caption);
+        let mut issues = listen::validate_yue2(&caption);
+        // Content, not just shape: an instrumental that comes back naming a
+        // language and a singer is the dropped instruction above, restated
+        // as the one problem the retry loop understands. A twice-wrong
+        // answer still returns the less broken of the two — never a refusal.
+        if instrumental && !listen::starts_instrumental(&caption) {
+            issues.push("an instrumental track must start with \"instrumental\", not a language and a singer".to_string());
+        }
         if best.as_ref().is_none_or(|(count, _)| issues.len() < *count) {
             best = Some((issues.len(), caption));
         }

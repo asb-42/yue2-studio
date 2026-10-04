@@ -229,6 +229,10 @@ pub fn yue2_request(heard: &Heard, facts: &Facts, language: &str, lyrics: &str, 
     lines.push(format!("BPM: {} — end the sentence with exactly \"{} BPM\".", facts.bpm, facts.bpm));
     if instrumental {
         lines.push("This track is INSTRUMENTAL: write \"instrumental\" as the language part and name the lead instrument in the vocal part.".into());
+        // Caption models hear voices in pads, strings and drones that are not
+        // there; the evidence above is trusted for genre, mood and arrangement
+        // but never for the existence of a vocal.
+        lines.push("Do not trust any vocal claim in the evidence above: there is no singer on this track.".into());
     } else if !lyrics.trim().is_empty() {
         let excerpt: String = lyrics.chars().take(400).collect();
         lines.push(String::new());
@@ -242,6 +246,14 @@ pub fn yue2_request(heard: &Heard, facts: &Facts, language: &str, lyrics: &str, 
 
 /// prompts.ts normalizeYue2Caption: labels, quotes and line breaks off, and
 /// the tempo tail rebuilt from the measured number.
+/// Whether a finished caption keeps an instrumental's promise: its first
+/// comma-separated part names "instrumental" (any capitalisation), so a
+/// dropped instruction reads as one concrete problem for the retry loop
+/// instead of a well-formed hallucination that passes validation.
+pub fn starts_instrumental(caption: &str) -> bool {
+    caption.split(',').next().is_some_and(|first| first.trim().eq_ignore_ascii_case("instrumental"))
+}
+
 pub fn normalize_yue2(raw: &str, bpm: u32) -> String {
     let mut text = raw.to_string();
     if let Some(found) = Regex::new(r"(?s)```(?:[a-z]*)\n(.*?)```").expect("valid regex").captures(&text) {
@@ -316,5 +328,21 @@ mod tests {
         assert!(!caption.contains("120"), "{caption}");
         assert!(validate_yue2(&caption).is_empty(), "{:?}", validate_yue2(&caption));
         assert!(validate_yue2("Russian indie pop, 104 BPM").iter().any(|issue| issue.starts_with("too short")));
+    }
+
+    #[test]
+    fn an_instrumental_answer_names_no_language_and_no_singer() {
+        assert!(starts_instrumental("instrumental, dark ambient drones, 90 BPM"));
+        assert!(starts_instrumental("  Instrumental , strings, 90 BPM"));
+        assert!(!starts_instrumental("English, cinematic dark pop, haunting ethereal female vocals, 75 BPM"));
+        assert!(!starts_instrumental(""));
+    }
+
+    #[test]
+    fn the_instrumental_request_distrusts_heard_voices() {
+        let heard = Heard { genre: "soundtrack".into(), caption: "Ethereal female vocals over strings.".into() };
+        let request = yue2_request(&heard, &facts(), "", "", true);
+        assert!(request.contains("no singer on this track"), "{request}");
+        assert!(request.contains("write \"instrumental\" as the language part"), "{request}");
     }
 }
