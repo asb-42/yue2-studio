@@ -373,9 +373,9 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
                     />
                 </>
             )}
-            {metaOpen && <SongMetadataDialog song={song} onClose={() => setMetaOpen(false)} onSaved={(updated) => actions.update?.(updated)} />}
         </div>
         )}
+        {metaOpen && <SongMetadataDialog song={song} onClose={() => setMetaOpen(false)} onSaved={(updated) => actions.update?.(updated)} />}
         </>
     );
 };
