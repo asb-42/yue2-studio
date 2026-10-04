@@ -206,7 +206,10 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
         };
     }, [isOpen, onClose]);
 
-    if (!isOpen) return null;
+    // The metadata dialog outlives the menu: it is portaled to the body and
+    // must not unmount with the menu's conditional tree (nor be eaten by
+    // the menu's click-outside closer, which only watches the menu node).
+    if (!isOpen && !metaOpen) return null;
 
     const handleAction = (action?: () => void) => {
         if (action) {
@@ -245,6 +248,8 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
         : 'animate-in fade-in slide-in-from-top-2';
 
     return (
+        <>
+        {isOpen && (
         <div
             ref={menuRef}
             className={`absolute ${positionClasses} ${directionClasses} w-52
@@ -370,5 +375,7 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
             )}
             {metaOpen && <SongMetadataDialog song={song} onClose={() => setMetaOpen(false)} onSaved={(updated) => actions.update?.(updated)} />}
         </div>
+        )}
+        </>
     );
 };
