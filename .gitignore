@@ -43,3 +43,6 @@ NEXT_SESSION_PROMPT.md
 *.password
 /target-check
 /_archive-*
+
+# MCP window screenshots land in the working directory; not sources.
+/screenshot.png
