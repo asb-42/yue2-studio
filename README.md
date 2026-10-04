@@ -172,6 +172,12 @@ No Python and no Node.js in the runtime path. Model weights are never part
 of a release. Full details: [`docs/linux.md`](docs/linux.md),
 [`docs/plans/linux-port.md`](docs/plans/linux-port.md).
 
+**Style by ear** (optional): the Training page offers an auto-describe pack
+(MOSS-Music + Beat This!, ~10.5 GB) that hears a song and writes its style
+caption itself. Once installed, Create → Cover and the library's Edit
+metadata use it automatically. See
+[`docs/linux.md`](docs/linux.md#style-by-ear-auto-describe).
+
 ## License
 
 The studio code is MIT ([LICENSE](LICENSE)), and so is yue2.cpp —

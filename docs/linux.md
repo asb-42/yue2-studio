@@ -101,6 +101,28 @@ HOT-Step commit from source and point `YUE_TRAIN_BIN` / `YUE_CAPTION_BIN` /
 `YUE_MIDI_BIN` at the binaries; weights can be placed by hand per the
 documented `data/` layout).
 
+## Style by ear (auto-describe)
+
+The optional listening pack (MOSS-Music + Beat This!) lets the studio hear a
+song and write its style caption itself — genre, vocals, instruments, mood —
+with the tempo measured from the recording. It is **not** installed by
+default; the Training page shows an "Auto-describe songs (optional)" card with
+a one-click download (~10.5 GB) when the pack is missing.
+
+Once installed, the style-by-ear path is used automatically when:
+
+- **Create → Cover → Cover a song** — the source song is heard and the style
+  is written from what was heard (the `describeByEarHint` in the cover flow
+  explains this).
+- **Library → song menu → Edit metadata** — the "Style by ear" action
+  re-hears the song and rewrites the style.
+
+The heard style is a draft: MOSS can hallucinate vocals on instrumental
+tracks, so the pipeline now distrusts heard vocal claims for instrumentals
+and requires the caption to start with "instrumental" when the track has
+no vocals. The assistant (llama.cpp) polishes the caption into the final
+YuE2 style line.
+
 ## Environment
 
 | Variable | Default | Meaning |
