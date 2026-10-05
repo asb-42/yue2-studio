@@ -30,6 +30,12 @@ done
 
 export PATH="$HOME/.cargo/bin:$PATH"
 
+# Clear errors for missing toolchains instead of cryptic failures later.
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "error: cargo not found; install Rust via rustup (https://rustup.rs) and rerun." >&2
+  exit 1
+fi
+
 DATA_ROOT="${YUE_STUDIO_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/yue2-studio}"
 export YUE_STUDIO_DATA_ROOT="$DATA_ROOT"
 export YUE_MODELS_ROOT="${YUE_MODELS_ROOT:-$DATA_ROOT/models/yue2-cpp}"
@@ -55,6 +61,21 @@ if [ -d /usr/local/cuda/lib64 ] && [[ ":${LD_LIBRARY_PATH:-}:" != *":/usr/local/
 fi
 
 mkdir -p "$DATA_ROOT"
+
+# Fresh clones have no app/node_modules (gitignored): install the UI
+# dependencies once, otherwise `npm run dev`/`build` below fails and the
+# trap on EXIT kills the service with it, leaving both ports dead.
+# Not needed for --service-only.
+if [ "$MODE" != "service-only" ]; then
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "error: npm not found; install Node 22+ and rerun." >&2
+    exit 1
+  fi
+  if [ ! -d "$REPO_ROOT/app/node_modules" ]; then
+    echo "installing UI dependencies (first run only)..."
+    npm --prefix "$REPO_ROOT/app" ci
+  fi
+fi
 
 if [ "$MODE" = "build" ] || [ "$MODE" = "service-only" ]; then
   cargo build --release -p music-server

@@ -61,11 +61,18 @@ recommendation conservatively falls back to `light` there.
 
 ## Quick start
 
+Prerequisites: Rust via rustup (`cargo` on `PATH`) plus the system packages
+below. The launcher checks both toolchains and installs the UI dependencies
+(`app/node_modules`, gitignored) itself on first run.
+
 ```sh
 ./scripts/run-linux.sh            # service on 127.0.0.1:8791 + vite UI on 127.0.0.1:3791
 ./scripts/run-linux.sh --build    # release service; UI at http://127.0.0.1:8791/ directly
 ./scripts/run-linux.sh --service-only
 ```
+
+In dev mode the browser goes to `http://127.0.0.1:3791`; `:8791` answers
+only the API there. With `--build` everything is on `:8791`.
 
 System packages: `build-essential cmake pkg-config git curl python3 node 22+`.
 Optional: CUDA toolkit 12 or 13 (`nvcc`), Vulkan SDK. Without `sudo`,
@@ -77,7 +84,8 @@ bootstrap ninja into `~/.local/bin` (see `docs/linux.md`).
 ```
 
 Then choose the Light set in setup (or any set your VRAM fits), press
-download, and Create. The first verified Linux song — a 30 s folk-pop track
+download, and Create. Without an engine build and downloaded models Create
+stays locked; the service itself runs regardless. The first verified Linux song — a 30 s folk-pop track
 on CUDA — took about a minute on GB10; Parakeet karaoke aligned it
 word-perfect in seconds, and HT-Demucs split six stems.
 

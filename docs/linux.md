@@ -14,6 +14,12 @@ dropped; system playback goes to VLC/mpv/mplayer through
 ./scripts/run-linux.sh --build    # release service + static vite build, UI served by the service itself
 ```
 
+First run needs Rust (`cargo`, via rustup) and, for the UI modes, Node 22+
+(`npm`); the launcher errors clearly when either is missing and installs
+`app/node_modules` (gitignored) itself via `npm ci`. In dev mode the browser
+goes to `:3791` (`:8791` answers only the API); if vite never starts, the
+launcher's EXIT trap stops the service too, so both ports stay dead.
+
 With `--build` (or `YUE_UI_DIR=/path/to/app/dist` set manually) the service
 serves the built interface on its own port: open `http://127.0.0.1:8791/`
 directly, no dev server needed. Same-origin, so the visualiser popup,
@@ -55,7 +61,7 @@ bound off-loopback with access already on, it prints the full
 the API logs it too. Afterwards the key lives in Settings and in
 `GET /v1/network` on loopback only — it is never shown to the network.
 
-System packages: `build-essential cmake pkg-config git curl python3 node 20+`.
+System packages: `build-essential cmake pkg-config git curl python3 node 22+`.
 `ninja` is used when present (no sudo? bootstrap it: see below).
 Optional: CUDA toolkit 12 or 13 (`nvcc`), Vulkan SDK + `glslc`.
 
