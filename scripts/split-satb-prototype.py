@@ -273,6 +273,64 @@ def rest_line(count: int) -> str:
     return f"Z{count}|"
 
 
+def bar_units_at(unit_den: int, num: int, mden: int) -> int:
+    """One bar measured in L units (a 4/4 bar at L:1/32 is 32 units)."""
+    whole = unit_den * num
+    if whole % mden:
+        raise SplitError(f"meter {num}/{mden} does not divide L:1/{unit_den} evenly")
+    return whole // mden
+
+
+def chord_and_rest(chord: str | None, units: int) -> str:
+    """A silent bar that still carries its chord symbol.
+
+    The dialect requires chord symbols on the Vocal line (`abc.rs:371`), but
+    a bare Z/Z4 cannot follow one (`abc.rs:97,379`), so the bar is a rest
+    spelled out in L units: 32 units = one 4/4 bar at L:1/32.
+    """
+    rest = f"z{units}" if units > 1 else "z"
+    return f'"{chord}"{rest}' if chord else rest
+
+
+def build_bed_abc(header_lines: list[str], sections: list[dict], unit_den: int,
+                  num: int, mden: int, chords: dict) -> str:
+    """An accompaniment score: the melody on the Ins line, Vocal silent.
+
+    A bed written like a vocal part is sung - the engine follows the score,
+    and no LoRA or style word un-instructs it (see plan, 2026-10-08).
+    """
+    units = bar_units_at(unit_den, num, mden)
+    out = list(header_lines)
+    for section in sections:
+        label = section["label"]
+        bars = section["bars"]["S"]  # the tune: soprano carries the melody
+        clist = chords.get(label, [None] * len(bars))
+        first_group = True
+        for start in range(0, len(bars), 4):
+            chunk = bars[start:start + 4]
+            cchunk = clist[start:start + 4] if clist else [None] * len(chunk)
+            bodies = []
+            for body in chunk:
+                body = body.strip()
+                if body in WHOLE_RESTS:
+                    bodies.append(body)
+                elif body.startswith('"'):
+                    raise SplitError(
+                        f"{label} bed: the tune line already carries chord symbols; "
+                        f"a bed keeps them on the silent Vocal line only"
+                    )
+                else:
+                    bodies.append(body)
+            if first_group:
+                out.append(f"% {label}")
+                first_group = False
+            out.append("V: Vocal")
+            out.append("|".join(chord_and_rest(c, units) for c in cchunk) + "|")
+            out.append("V: Ins")
+            out.append("|".join(bodies) + "|")
+    return "\n".join(out) + "\n"
+
+
 def build_part_abc(header_lines: list[str], sections: list[dict],
                    part: str, expect_units: int, chords: dict) -> str:
     out = list(header_lines)
@@ -456,7 +514,7 @@ def cmd_split(args: argparse.Namespace) -> int:
         "part": "bed",
         "title": f"{args.title_prefix} (bed)" if args.title_prefix else None,
         "style": args.instrumental_style,
-        "lyrics": "",
+        "lyrics": "[instrumental]",
         "lyrics_complete": True,
         "abc_file": None,
         "cot": args.cot,
@@ -466,8 +524,14 @@ def cmd_split(args: argparse.Namespace) -> int:
         "seed": args.seed,
         "vocals_only": False,
         "output_format": None,
-        "notes": "instrumental bed; model composes its own score (no abc).",
+        "notes": "accompaniment; melody on the Ins line, Vocal silent (see bed_abc_file).",
     })
+    bed_abc = build_bed_abc(header_lines, arr["sections"], header["l_den"],
+                            header["num"], header["mden"], arr["chords"])
+    check_native(bed_abc, "part_BED.abc")
+    bed_path = out_dir / "part_BED.abc"
+    bed_path.write_text(bed_abc, encoding="utf-8")
+    jobs[-1]["abc_file"] = bed_path.name
     manifest = {
         "prototype": "split-satb-prototype v1 (dev-only; not part of the runtime)",
         "plan": "docs/plans/2026-10-05_ensemble.md",
@@ -489,7 +553,7 @@ def cmd_split(args: argparse.Namespace) -> int:
           f"({', '.join(s['label'] for s in arr['sections'])})")
     print(f"tempo: Q:1/4={header['bpm']}, estimated song {seconds:.1f}s "
           f"-> duration_seconds {duration}")
-    print(f"wrote: {[f'part_{p}.abc' for p in PARTS] + ['manifest.json']} in {out_dir}")
+    print(f"wrote: {[f'part_{p}.abc' for p in PARTS] + ['part_BED.abc', 'manifest.json']} in {out_dir}")
     if any(j["part"] in PARTS and not j["lyrics_complete"] for j in jobs):
         print("note: no per-part lyrics in input; manifest carries tag skeletons only. "
               "Fill lyric lines before rendering.", file=sys.stderr)
