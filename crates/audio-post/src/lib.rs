@@ -8,6 +8,7 @@
 
 pub mod denoise;
 pub mod encode;
+pub mod harmony;
 pub mod lifter;
 pub mod mastering;
 pub mod naturalize;
