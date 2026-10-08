@@ -1,13 +1,19 @@
 //! Harmonised voices derived from one lead: the same singing, shifted.
 //!
 //! **Experimental.** It works and is tested, but it has been heard on exactly
-//! one kind of material, and it did not sound good: stacked on a *syllabic*
-//! lead — a verse with a note per syllable — every voice carries its own
-//! smeared consonants on top of each other and the result is mud, not a choir.
-//! Parallel shifting makes musical sense where the source is **sustained and
-//! sparse**: held notes, a drone, an organ chord, a pad. There each copy is one
-//! clean sustained tone, and stacking reads as one thick sound. Pick the
-//! material before reaching for this.
+//! two kinds of material, and only one of them was good:
+//!
+//! - **A syllabic lead** — a verse with a note per syllable — came out as mud.
+//!   Every voice carries its own smeared consonants over the others'. Parallel
+//!   shifting wants **sustained and sparse** material: held notes, a drone, an
+//!   organ chord, a pad.
+//! - **A whole mix** came out dissonant and out of tune. Every instrument in
+//!   it is transposed and stacked, the vocal's formants shift with it, and the
+//!   peak runs into the limiter. The same registration on the *separated
+//!   stems* is clean and needs no gain reduction at all.
+//!
+//! So: separate first, stack the stem, and mix the stems back. This is a
+//! texture tool for one sustained part — it adds thickness, never new music.
 //!
 //! Every voice is a pitch-shifted copy of the lead, so by construction it
 //! shares the lead's timing sample for sample — which is the one thing a
