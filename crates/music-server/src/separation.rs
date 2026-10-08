@@ -73,6 +73,7 @@ pub const MODEL: Asset = Asset {
     unzip_into: None,
     marker: "",
     pick: &[],
+    keep: &[],
     vram_gb: Some(2),
     note: "Six stems: drums, bass, other, vocals, guitar, piano. MIT-licensed, runs on the studio's ONNX Runtime.",
 };

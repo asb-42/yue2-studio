@@ -5190,36 +5190,16 @@ fn karaoke_set(name: &str, device: lyrics_sync::OnnxFlavour, whisper_model: Opti
             }
         }
         "whisper" => {
-            // Linux has no Whisper standalone runtime (its three downloads
-            // are Windows builds); the install endpoint says so outright.
-            // Keeping the set empty here is the second lock on that door.
-            #[cfg(windows)]
-            {
-                // One binary whichever device is chosen; the card needs CUDA 11's
-                // libraries beside it, and without them CTranslate2 silently uses
-                // the processor instead of saying so.
-                wanted.push("whisper-engine".into());
-                if device.uses_cuda() {
-                    wanted.push("whisper-cublas".into());
-                    wanted.push("whisper-cudnn".into());
-                }
-                // A model is a directory of files, and it is useless one file
-                // short, so the whole set goes together.
-                let chosen = whisper_model.unwrap_or("whisper-large-v3-turbo");
-                if let Some(size) = chosen.strip_prefix("whisper-") {
-                    let prefix = format!("models/whisper/faster-whisper-{size}/");
-                    wanted.extend(
-                        lyrics_sync::ASSETS
-                            .iter()
-                            .filter(|asset| asset.relative_path.starts_with(&prefix))
-                            .map(|asset| asset.id.to_string()),
-                    );
-                }
-            }
-            #[cfg(not(windows))]
-            {
-                let _ = (device, whisper_model);
-            }
+            // One binary whichever device is chosen: whisper.cpp links what it
+            // needs for the processor, and a card build is dropped into the
+            // same folder under the same name, so the set does not follow the
+            // device the way CTranslate2's two Windows libraries did.
+            wanted.push("whisper-engine".into());
+            // A model is one GGML file. `base` is the default because the
+            // runtime that ships here runs on the processor, where
+            // large-v3-turbo would be a quarter of an hour for one song; the
+            // dropdown is where a bigger one is asked for.
+            wanted.push(whisper_model.unwrap_or("whisper-base").to_string());
         }
         _ => {}
     }
@@ -5230,15 +5210,6 @@ async fn karaoke_install(
     State(state): State<AppState>,
     Json(request): Json<AssistantAssetRequest>,
 ) -> Result<Json<lyrics_sync::SyncStatus>, (StatusCode, Json<ApiError>)> {
-    // Whisper's standalone runtime ships Windows builds only; offering the
-    // download on Linux would fetch gigabytes nobody can run. Parakeet and
-    // OpenRouter cover karaoke there.
-    if cfg!(not(windows)) && request.asset_id == "whisper" {
-        return Err(api_error(
-            StatusCode::BAD_REQUEST,
-            "Whisper is not available on Linux: use Parakeet, or an OpenRouter speech-to-text model".into(),
-        ));
-    }
     let config = state.lyrics_sync_config.read().await.clone();
     let set = karaoke_set(
         &request.asset_id,

@@ -79,6 +79,7 @@ pub fn tool_asset() -> &'static Asset {
             unzip_into: Some(TOOL_FOLDER),
             marker: leak(source.shipped_as.clone()),
             pick: &[],
+            keep: &[],
             vram_gb: None,
             note: "",
         }
@@ -102,6 +103,7 @@ fn weight_assets(size: &'static Size) -> &'static [Asset] {
                     unzip_into: None,
                     marker: "",
                     pick: &[],
+                    keep: &[],
                     vram_gb: None,
                     note: "CC BY-NC 4.0: for non-commercial use.",
                 };

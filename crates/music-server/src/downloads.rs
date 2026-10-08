@@ -49,6 +49,12 @@ pub struct Asset {
     /// range requests - the rest is never downloaded. NVIDIA's libraries come
     /// in archives several times larger than the parts anyone uses.
     pub pick: &'static [&'static str],
+    /// Name prefixes of the files that belong beside the engine when this
+    /// archive is unpacked, when unpacking has to be selective. An empty list
+    /// means the archive's own layout decides: the ONNX Runtime tarballs carry
+    /// a dozen builds and only the libraries are wanted, while a small runtime
+    /// that ships everything it needs is unpacked whole.
+    pub keep: &'static [&'static str],
     /// Roughly how much VRAM the asset wants; informational only.
     pub vram_gb: Option<u32>,
     pub note: &'static str,
@@ -384,7 +390,7 @@ impl Downloader {
         if let Some(flavour) = asset.unzip_into {
             // On Linux the runtime archives are .tar.gz holding far more than
             // the loader reads; only the libraries land beside the engine.
-            extract_runtime_archive(&target, &self.root.join("runtime").join(flavour))?;
+            extract_runtime_archive(asset, &target, &self.root.join("runtime").join(flavour))?;
         }
         Ok(())
     }
@@ -440,7 +446,7 @@ impl Downloader {
             let mut guard = progress.lock().await;
             let error = match outcome {
                 Ok(()) => match asset.unzip_into {
-                    Some(flavour) => extract_runtime_archive(&target, &root.join("runtime").join(flavour)).err().map(|error| error.to_string()),
+                    Some(flavour) => extract_runtime_archive(asset, &target, &root.join("runtime").join(flavour)).err().map(|error| error.to_string()),
                     None => None,
                 },
                 Err(error) => Some(error.to_string()),
@@ -681,12 +687,16 @@ pub fn extract_archive(archive: &Path, destination: &Path, keep: &[&str]) -> Res
 }
 
 /// Unpacks a downloaded runtime for the shared downloader: zips the Windows
-/// way, tarballs keeping only the ONNX libraries. The tarballs are the only
-/// archives this downloader fetches on Linux (the ONNX Runtime builds; every
-/// other Linux runtime goes through its own module), so the filter lives here
-/// rather than on every asset.
-fn extract_runtime_archive(archive: &Path, destination: &Path) -> Result<()> {
-    extract_archive(archive, destination, &["libonnxruntime"])
+/// way, tarballs keeping what the asset says it needs.
+///
+/// The ONNX Runtime tarballs carry a dozen builds of the same library and only
+/// one set is wanted, so their assets leave this empty and the ONNX prefix is
+/// the default. A small runtime that ships exactly what it links - whisper.cpp
+/// and its own `.so` files - names its files and is unpacked whole, which is
+/// what its four megabytes are.
+fn extract_runtime_archive(asset: &Asset, archive: &Path, destination: &Path) -> Result<()> {
+    let keep: &[&str] = if asset.keep.is_empty() { &["libonnxruntime"] } else { asset.keep };
+    extract_archive(archive, destination, keep)
 }
 
 /// The first executable named `name` in the given flavour directories, in

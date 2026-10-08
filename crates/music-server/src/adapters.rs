@@ -120,6 +120,7 @@ fn catalog() -> &'static [CatalogItem] {
                             unzip_into: None,
                             marker: "",
                             pick: &[],
+                            keep: &[],
                             vram_gb: None,
                             note: "",
                         }));
@@ -853,6 +854,7 @@ impl AdapterLibrary {
                 unzip_into: None,
                 marker: "",
                 pick: &[],
+                keep: &[],
                 vram_gb: None,
                 note: "",
             }))

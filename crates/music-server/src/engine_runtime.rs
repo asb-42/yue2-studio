@@ -81,6 +81,7 @@ const CUBLAS13: Asset = Asset {
     unzip_into: None,
     marker: "cublasLt64_13.dll",
     pick: &CUDA13_LIBRARIES,
+    keep: &[],
     vram_gb: None,
     note: "The linear algebra the engine's CUDA backend is linked against. Without it the engine cannot start at all.",
 };
@@ -97,6 +98,7 @@ const CUBLAS12: Asset = Asset {
     unzip_into: None,
     marker: "cublasLt64_12.dll",
     pick: &CUDA12_LIBRARIES,
+    keep: &[],
     vram_gb: None,
     note: "The linear algebra of the engine's CUDA 12 backend, for cards CUDA 13 dropped and older drivers.",
 };
