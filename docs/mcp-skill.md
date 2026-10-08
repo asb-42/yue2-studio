@@ -97,6 +97,25 @@ connected and the address to paste.
 
 ## Recipes
 
+**Thicken a held part with the harmonizer (experimental)**
+
+`processing_start` takes a `harmonize` stage: `{preset, lead_gain, limit}`, where
+`preset` is `mixture` (octaves and fifths - start here), `satb`, `thirds`, or
+`none`. It builds pitch-shifted copies of the track *under* the lead, so the
+copies share its timing sample for sample - the one thing generated voices
+cannot do for themselves.
+
+Know the limits before you use it:
+
+- **Sustained material only.** Held organ chords, drones, pads. On a syllabic
+  sung line each copy smears its own consonants over the others' and the result
+  is mud, not a choir.
+- **Never the whole mix.** Every instrument gets shifted at once, the vocal's
+  formants move with it, and it will sound out of tune. Separate first
+  (`separation_start`), stack the stem you want, mix the stems back.
+- It adds thickness, never new music. Keep it and `processing_keep` it as a
+  version so the original is still there to hear it against.
+
 **A song from an idea**
 
 1. `writing_guide` topic `song`, `writing_examples` with the genre and mood.
@@ -206,7 +225,7 @@ move around. Check the result with `ui_screenshot`.
   **playlist**: list/create/update/delete.
 - **cover**: draw, set from file, templates, prompt render; **karaoke**: make, delete,
   settings; **recogniser**: install/remove; **stems**: split, get; **separator**: status,
-  install, settings; **midi**: status, transcribe, get, delete, install, remove, cancel; **processing**: start, get, keep, discard, reference (**vst** tools exist but refuse on Linux: no VST3 host in this fork).
+  install, settings; **midi**: status, transcribe, get, delete, install, remove, cancel; **processing**: start, get, keep, discard, reference (start also takes a `harmonize` stage, experimental - see the recipe above; **vst** tools exist but refuse on Linux: no VST3 host in this fork).
 - **lora**: list, install from the catalogue or Hugging Face, import files, update,
   delete, export for ComfyUI (a trained LoRA as one file for ComfyUI's native YuE2).
 - **dataset**: create, add folder or library songs, import, get, update, delete, song

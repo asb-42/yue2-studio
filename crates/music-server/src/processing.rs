@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use audio_post::{denoise, lifter, mastering, naturalize, Stereo};
+use audio_post::{denoise, harmony, lifter, mastering, naturalize, Stereo};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -23,6 +23,10 @@ pub struct ProcessRequest {
     pub lifter: Option<lifter::LifterSettings>,
     #[serde(default)]
     pub naturalize: Option<naturalize::NaturalizeSettings>,
+    /// Experimental: pitch-shifted copies of the track under the lead, so the
+    /// voices share its timing exactly. Sustained material only.
+    #[serde(default)]
+    pub harmonize: Option<harmony::HarmonizeSettings>,
     /// VST3 plugins, run in order before mastering.
     #[serde(default)]
     pub vst: Option<Vec<crate::vst::VstSlot>>,
@@ -50,6 +54,12 @@ impl ProcessRequest {
         }
         if self.naturalize.is_some() {
             stages.push("naturalize");
+        }
+        // a registration of "none" would do nothing, so it is not a stage
+        if self.harmonize.as_ref().is_some_and(|settings| {
+            settings.preset.eq_ignore_ascii_case("custom") || !settings.voices().is_ok_and(|voices| voices.is_empty())
+        }) {
+            stages.push("harmonize");
         }
         if self.vst.as_ref().is_some_and(|chain| chain.iter().any(|slot| slot.enabled)) {
             stages.push("vst");
@@ -140,6 +150,10 @@ pub fn run(
         on_stage("naturalize");
         audio = naturalize::naturalize(&audio, settings);
     }
+    if let Some(settings) = &request.harmonize {
+        on_stage("harmonize");
+        audio = settings.apply(&audio).with_context(|| "harmonise the track")?;
+    }
     if let Some(chain) = request.vst.as_ref().filter(|chain| chain.iter().any(|slot| slot.enabled)) {
         on_stage("vst");
         let host = vst.context("the VST host is not installed")?;
@@ -182,7 +196,33 @@ mod tests {
         assert_eq!(parsed.lifter.unwrap().shimmer_reduction_db, 3.0);
     }
 
-    #[test]
+    /// The harmoniser arrives as one more stage: named registrations resolve, an
+/// empty one is not a stage, and an unknown name is refused rather than
+/// silently ignored.
+#[test]
+    fn the_harmoniser_is_a_stage_that_refuses_what_it_cannot_do() {
+        let named: ProcessRequest =
+            serde_json::from_value(serde_json::json!({ "harmonize": { "preset": "mixture" } })).unwrap();
+        assert_eq!(named.stages(), vec!["harmonize"]);
+        assert_eq!(named.harmonize.as_ref().expect("stage").preset, "mixture");
+
+        let empty: ProcessRequest =
+            serde_json::from_value(serde_json::json!({ "harmonize": { "preset": "none" } })).unwrap();
+        assert!(empty.stages().is_empty(), "preset none would do nothing");
+
+        let custom: ProcessRequest = serde_json::from_value(serde_json::json!({
+            "harmonize": { "preset": "custom", "voices": [{ "semitones": 7.0, "gain": 0.5 }] }
+        }))
+        .unwrap();
+        assert_eq!(custom.stages(), vec!["harmonize"]);
+
+        let broken = harmony::HarmonizeSettings { preset: "barbershop".into(), ..Default::default() };
+        assert!(broken.voices().is_err(), "an unknown registration must be refused");
+        let bare = harmony::HarmonizeSettings { preset: "custom".into(), ..Default::default() };
+        assert!(bare.voices().is_err(), "custom without voices must be refused");
+    }
+
+#[test]
     fn a_vst_chain_runs_before_mastering_only_with_a_plugin_on() {
         let chain = |enabled| serde_json::json!([{ "path": "C:/x.vst3", "name": "X", "enabled": enabled }]);
         let on: ProcessRequest = serde_json::from_value(serde_json::json!({ "vst": chain(true), "master": { "type": "upload", "upload_id": "u" } })).unwrap();

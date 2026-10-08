@@ -95,6 +95,9 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
   const [punch, setPunch] = useState(0);
   const [naturalizeOn, setNaturalizeOn] = useState(false);
   const [naturalizeAmount, setNaturalizeAmount] = useState(0.5);
+  const [harmonizeOn, setHarmonizeOn] = useState(false);
+  const [harmonizePreset, setHarmonizePreset] = useState('mixture');
+  const [harmonizeLead, setHarmonizeLead] = useState(1);
   const [vstOn, setVstOn] = useState(false);
   const [vstAvailable, setVstAvailable] = useState(false);
   const [vstPlugins, setVstPlugins] = useState<VstPlugin[] | null>(null);
@@ -211,7 +214,7 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
     : upload && { type: 'upload', upload_id: upload.upload_id };
   const referenceTitle = referenceMode === 'library' ? referenceSong?.title : upload?.name;
   const vstReady = vstChain.some(slot => slot.enabled);
-  const nothing = !denoiseOn && !lifterOn && !naturalizeOn && !(vstOn && vstReady) && !masterOn;
+  const nothing = !denoiseOn && !lifterOn && !naturalizeOn && !harmonizeOn && !(vstOn && vstReady) && !masterOn;
   const ready = !nothing && (!masterOn || Boolean(reference));
 
   const uploadReference = async (file: File | undefined) => {
@@ -240,6 +243,7 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
     if (denoiseOn) request.denoise = { strength: denoiseStrength };
     if (lifterOn) request.lifter = { denoise_strength: lifterGate, shimmer_reduction_db: shimmer, hf_mix: highBand, transient_boost: punch };
     if (naturalizeOn) request.naturalize = { amount: naturalizeAmount };
+    if (harmonizeOn) request.harmonize = { preset: harmonizePreset, lead_gain: harmonizeLead, limit: true };
     if (vstOn && vstReady) request.vst = vstChain;
     if (masterOn && reference) request.master = reference;
     try {
@@ -267,6 +271,7 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
       parts.push(`${t('processLifter')} (${values.join(', ')})`);
     }
     if (naturalizeOn) parts.push(`${t('processNaturalize')} ${naturalizeAmount.toFixed(2)}`);
+    if (harmonizeOn) parts.push(`${t('processHarmonize')} ${t(`processPreset${harmonizePreset.charAt(0).toUpperCase()}${harmonizePreset.slice(1)}`)}`);
     if (vstOn && vstReady) parts.push(`VST (${vstChain.filter(slot => slot.enabled).map(slot => slot.name).join(', ')})`);
     if (masterOn) parts.push(referenceTitle ? `${t('processStage_master')} · ${referenceTitle}` : t('processStage_master'));
     // a processed version processed again carries its whole chain
@@ -341,6 +346,28 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
               <section className={CARD}>
                 <Toggle checked={naturalizeOn} onChange={setNaturalizeOn} label={t('processNaturalize')} hint={t('processNaturalizeHint')} />
                 {naturalizeOn && <Slider label={t('processAmount')} value={naturalizeAmount} min={0.05} max={1} step={0.05} onChange={setNaturalizeAmount} />}
+              </section>
+
+              <section className={CARD}>
+                <Toggle checked={harmonizeOn} onChange={setHarmonizeOn} label={t('processHarmonize')} hint={t('processHarmonizeHint')} />
+                {harmonizeOn && (
+                  <div className="mt-3 space-y-2">
+                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-200">
+                      {t('processRegistration')}
+                      <select
+                        value={harmonizePreset}
+                        onChange={event => setHarmonizePreset(event.target.value)}
+                        className={`mt-1 w-full ${CONTROL}`}
+                        aria-label={t('processRegistration')}
+                      >
+                        <option value="mixture">{t('processPresetMixture')}</option>
+                        <option value="satb">{t('processPresetSatb')}</option>
+                        <option value="thirds">{t('processPresetThirds')}</option>
+                      </select>
+                    </label>
+                    <Slider label={t('processLeadLevel')} value={harmonizeLead} min={0.2} max={1} step={0.05} onChange={setHarmonizeLead} />
+                  </div>
+                )}
               </section>
 
               <section className={CARD}>

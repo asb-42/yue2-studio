@@ -30,6 +30,7 @@
 //! roughly half an octave out.
 
 use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
 use realfft::num_complex::Complex32;
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 
@@ -42,7 +43,7 @@ const SIZE: usize = 2048;
 const HOP: usize = SIZE / 4;
 
 /// One harmony voice: how far from the lead, in semitones, and how loud.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Voice {
     pub semitones: f32,
     pub gain: f32,
@@ -81,6 +82,73 @@ pub fn thirds_above() -> Vec<Voice> {
 /// the safest of the three, though still parallel.
 pub fn organ_mixture() -> Vec<Voice> {
     vec![Voice::new(-12.0, 0.7), Voice::new(-7.0, 0.5), Voice::new(12.0, 0.35)]
+}
+
+/// A named registration, for callers that hold a name rather than a list:
+/// `mixture`, `satb`, `thirds`, or `none` for the lead alone.
+pub fn preset(name: &str) -> Option<Vec<Voice>> {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "none" | "" => Some(Vec::new()),
+        "mixture" | "organ" | "organ_mixture" => Some(organ_mixture()),
+        "satb" | "choir" => Some(satb()),
+        "thirds" | "thirds_above" => Some(thirds_above()),
+        _ => None,
+    }
+}
+
+/// What the processing stage is given: a registration by name, or the voices
+/// themselves, and how loud the lead stays.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HarmonizeSettings {
+    /// `mixture` (default), `satb`, `thirds`, `none`, or `custom`.
+    pub preset: String,
+    /// Used when `preset` is `custom`: semitones from the lead and a level.
+    pub voices: Vec<Voice>,
+    /// How loud the lead itself stays.
+    pub lead_gain: f32,
+    /// Put the result under the peak, rather than let the stack clip.
+    pub limit: bool,
+}
+
+impl Default for HarmonizeSettings {
+    fn default() -> Self {
+        Self {
+            preset: "mixture".into(),
+            voices: Vec::new(),
+            lead_gain: 1.0,
+            limit: true,
+        }
+    }
+}
+
+impl Voice {
+    /// The names a caller may use, for an error message that helps.
+    pub const PRESETS: [&'static str; 4] = ["mixture", "satb", "thirds", "none"];
+}
+
+impl HarmonizeSettings {
+    /// The voices these settings ask for, refusing a name it does not know.
+    pub fn voices(&self) -> Result<Vec<Voice>> {
+        if self.preset.eq_ignore_ascii_case("custom") {
+            if self.voices.is_empty() {
+                bail!("preset custom needs at least one voice");
+            }
+            return Ok(self.voices.clone());
+        }
+        preset(&self.preset)
+            .ok_or_else(|| anyhow::anyhow!("unknown preset {}: try one of {}", self.preset, Voice::PRESETS.join(", ")))
+    }
+
+    /// Runs the stack over `lead`.
+    pub fn apply(&self, lead: &Stereo) -> Result<Stereo> {
+        let voices = self.voices()?;
+        let mut stacked = harmonize(lead, &voices, self.lead_gain)?;
+        if self.limit {
+            stacked.keep_below(0.99);
+        }
+        Ok(stacked)
+    }
 }
 
 /// Shifts one channel by `semitones`, keeping its length.
@@ -482,11 +550,50 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_named_registrations_are_reachable_by_name() {
+        assert!(preset("mixture").is_some_and(|v| v.len() == 3));
+        assert!(preset("SATB").is_some_and(|v| v.len() == 3));
+        assert!(preset(" Thirds ").is_some_and(|v| v.len() == 2));
+        assert!(preset("none").is_some_and(|v| v.is_empty()));
+        assert!(preset("barbershop").is_none(), "an unknown name must not resolve");
+    }
+
+    #[test]
+    fn settings_carry_a_registration_to_the_audio() {
+        let lead = Stereo::new(tone(220.0, 0.3, 48_000), tone(220.0, 0.3, 48_000), 48_000);
+        let settings = HarmonizeSettings { preset: "mixture".into(), ..Default::default() };
+        let stacked = settings.apply(&lead).expect("mixture");
+        assert_eq!(stacked.frames(), lead.frames());
+        assert!(stacked.peak() <= 0.99, "limited to {}", stacked.peak());
+        let alone = HarmonizeSettings { preset: "none".into(), ..Default::default() }
+            .apply(&lead).expect("none");
+        let worst = alone.left.iter().zip(&lead.left).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+        assert!(worst < 1e-6, "worst difference {worst}");
+    }
+
+    #[test]
+    fn custom_voices_are_used_as_given() {
+        let lead = Stereo::new(tone(220.0, 0.2, 48_000), tone(220.0, 0.2, 48_000), 48_000);
+        let settings = HarmonizeSettings {
+            preset: "custom".into(),
+            voices: vec![Voice::new(7.0, 0.5)],
+            lead_gain: 1.0,
+            limit: false,
+        };
+        let stacked = settings.apply(&lead).expect("custom");
+        assert_eq!(stacked.frames(), lead.frames());
+    }
+
+    #[test]
     fn rubbish_settings_are_refused_with_a_reason() {
         let lead = Stereo::new(vec![0.0; 64], vec![0.0; 64], 48_000);
         assert!(harmonize(&lead, &[Voice::new(f32::NAN, 1.0)], 1.0).is_err());
         assert!(harmonize(&lead, &[Voice::new(3.0, f32::INFINITY)], 1.0).is_err());
         assert!(harmonize(&lead, &[], f32::NAN).is_err());
+        assert!(HarmonizeSettings { preset: "barbershop".into(), ..Default::default() }
+            .apply(&lead).is_err());
+        assert!(HarmonizeSettings { preset: "custom".into(), ..Default::default() }
+            .apply(&lead).is_err());
     }
 }
 
