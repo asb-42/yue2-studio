@@ -98,6 +98,10 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
   const [harmonizeOn, setHarmonizeOn] = useState(false);
   const [harmonizePreset, setHarmonizePreset] = useState('mixture');
   const [harmonizeLead, setHarmonizeLead] = useState(1);
+  const [stems, setStems] = useState<string[]>([]);
+  const [stemSource, setStemSource] = useState('');
+  const [remixOn, setRemixOn] = useState(true);
+  const [stemLevels, setStemLevels] = useState<Record<string, number>>({});
   const [vstOn, setVstOn] = useState(false);
   const [vstAvailable, setVstAvailable] = useState(false);
   const [vstPlugins, setVstPlugins] = useState<VstPlugin[] | null>(null);
@@ -128,6 +132,18 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
       })
       .then(list => setLibrary(list.filter(entry => entry.audio_path && entry.id !== song.id)))
       .catch((problem: unknown) => setError(problem instanceof Error ? problem.message : String(problem)));
+  }, [song.id]);
+
+  // Which stems this track already has: the choice of what the stages read
+  // only exists once a split has been made.
+  useEffect(() => {
+    void fetch(`/v1/library/songs/${encodeURIComponent(song.id)}/stems`)
+      .then(async response => {
+        if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+        return response.json() as Promise<{ stems: string[] }>;
+      })
+      .then(body => setStems(body.stems || []))
+      .catch(() => setStems([]));
   }, [song.id]);
 
   useEffect(() => {
@@ -214,7 +230,9 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
     : upload && { type: 'upload', upload_id: upload.upload_id };
   const referenceTitle = referenceMode === 'library' ? referenceSong?.title : upload?.name;
   const vstReady = vstChain.some(slot => slot.enabled);
-  const nothing = !denoiseOn && !lifterOn && !naturalizeOn && !harmonizeOn && !(vstOn && vstReady) && !masterOn;
+  const nothing = !denoiseOn && !lifterOn && !naturalizeOn && !harmonizeOn && !(vstOn && vstReady) && !masterOn
+    // a stem on its own is still work: the levels below are a mixer
+    && !(remixOn && stemSource);
   const ready = !nothing && (!masterOn || Boolean(reference));
 
   const uploadReference = async (file: File | undefined) => {
@@ -240,11 +258,21 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
     setError(null);
     setRunLabel(label());
     const request: Record<string, unknown> = {};
+    // a stem chosen is the source; a remix is only ever sent with one, which
+    // is the arrangement the stages above are meant for
+    if (stemSource) request.source = { stem: stemSource };
     if (denoiseOn) request.denoise = { strength: denoiseStrength };
     if (lifterOn) request.lifter = { denoise_strength: lifterGate, shimmer_reduction_db: shimmer, hf_mix: highBand, transient_boost: punch };
     if (naturalizeOn) request.naturalize = { amount: naturalizeAmount };
     if (harmonizeOn) request.harmonize = { preset: harmonizePreset, lead_gain: harmonizeLead, limit: true };
     if (vstOn && vstReady) request.vst = vstChain;
+    if (remixOn && stemSource) {
+      // only the stems that were actually moved are sent, so a level left
+      // alone keeps the level the separator gave it
+      const levels: Record<string, number> = {};
+      for (const [stem, level] of Object.entries(stemLevels)) if (level !== 1) levels[stem] = level;
+      request.remix = { levels, limit: true };
+    }
     if (masterOn && reference) request.master = reference;
     try {
       const response = await fetch(`/v1/library/songs/${encodeURIComponent(song.id)}/process`, {
@@ -263,6 +291,7 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
   // names the version, its downloaded file and the line above the comparison
   const label = () => {
     const parts: string[] = [];
+    if (stemSource) parts.push(`${t('processStems')}: ${t(`stem_${stemSource}` as never) || stemSource}`);
     if (denoiseOn) parts.push(`${t('processDenoise')} ${denoiseStrength.toFixed(2)}`);
     if (lifterOn) {
       const values = [lifterGate.toFixed(2), `${shimmer.toFixed(1)} dB`];
@@ -326,6 +355,47 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
 
           {!preview && (
             <fieldset disabled={running} className="space-y-3 disabled:opacity-60">
+              {stems.length > 0 && (
+                <section className={CARD}>
+                  <p className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">{t('processStems')}</p>
+                  <p className="mt-1 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">{t('processStemsHint')}</p>
+                  <label className="mt-3 block text-xs font-medium text-zinc-700 dark:text-zinc-200">
+                    {t('processProcessWhat')}
+                    <select
+                      value={stemSource}
+                      onChange={event => setStemSource(event.target.value)}
+                      className={`mt-1 w-full ${CONTROL}`}
+                      aria-label={t('processProcessWhat')}
+                    >
+                      <option value="">{t('processWholeMix')}</option>
+                      {stems.map(stem => (
+                        <option key={stem} value={stem}>{t(`stem_${stem}` as never) || stem}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {stemSource && (
+                    <div className="mt-3 space-y-2">
+                      <Toggle
+                        checked={remixOn}
+                        onChange={setRemixOn}
+                        label={t('processRemix')}
+                        hint={t('processRemixHint')}
+                      />
+                      {remixOn && stems.map(stem => (
+                        <Slider
+                          key={stem}
+                          label={`${t('processStemLevel')} · ${t(`stem_${stem}` as never) || stem}`}
+                          value={stemLevels[stem] ?? 1}
+                          min={0}
+                          max={1.5}
+                          step={0.05}
+                          onChange={level => setStemLevels(levels => ({ ...levels, [stem]: level }))}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )}
               <section className={CARD}>
                 <Toggle checked={denoiseOn} onChange={setDenoiseOn} label={t('processDenoise')} hint={t('processDenoiseHint')} />
                 {denoiseOn && <Slider label={t('processStrength')} value={denoiseStrength} min={0.05} max={1} step={0.05} onChange={setDenoiseStrength} />}

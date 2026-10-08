@@ -158,6 +158,27 @@ trained mostly on finished mixes, not on isolated stems. Treat this as
 principled and currently unavoidable — plan mixes around it rather than
 assuming stem surgery is clean.
 
+### The chain that makes the harmonizer usable: stems → stack → remix
+
+A processing run reads either the track's own file (`"source": "mix"`) or one
+stem of it (`"source": {"stem": "vocals"}`), and a `remix` puts the stems back
+together afterwards, the processed audio standing in for the stem it came from.
+The UI offers both in the processing panel, once a track has been split.
+
+That order is not decoration. The harmonizer shifts *everything* it is given:
+on a whole mix every instrument moves at once and the voice's formants move
+with it, which is why it only sounds right on a single stem. A remix of a
+whole mix would sum the untouched mix back over the processed one, so the
+server refuses it — a remix needs a stem as its source, and stems on disk.
+
+An untouched remix gives the mix back. Measured on a 95.976 s track: the six
+stems sum to a peak of 1.0212, the remix is that sum held at 0.9900, and the
+result matches the scaled sum to 0.000000. Which is what makes the per-stem
+levels worth trusting — a stem turned down is heard as turned down.
+
+The bleed-through above still applies to the result: a stacked stem carries
+fragments of the others, and `remix` puts them back.
+
 ## Environment
 
 | Variable | Default | Meaning |

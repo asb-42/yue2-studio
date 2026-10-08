@@ -1794,10 +1794,47 @@ async fn start_processing(
         .get_song(&id)
         .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Song not found".into()))?;
-    let source = state
-        .library
-        .media_path_for_song(&song)
-        .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "this track has no stored audio".into()))?;
+    // The stages read either the track's own file or a single stem of it, and
+    // a remix needs every stem, so all of it is resolved before the run starts.
+    let source = processing::RunSource {
+        path: match &request.source {
+            processing::Source::Mix => state
+                .library
+                .media_path_for_song(&song)
+                .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "this track has no stored audio".into()))?,
+            processing::Source::Stem(name) => {
+                if !crate::separation::STEMS.contains(&name.as_str()) {
+                    return Err(api_error(StatusCode::BAD_REQUEST, format!("unknown stem {name}")));
+                }
+                let path = stem_path(&state, &id, name);
+                if !path.is_file() {
+                    return Err(api_error(
+                        StatusCode::BAD_REQUEST,
+                        format!("this track has no {name} stem yet; separate it into stems first"),
+                    ));
+                }
+                path
+            }
+        },
+        stem: request.source.stem().map(str::to_owned),
+        stems: stems_on_disk(&state, &id)
+            .into_iter()
+            .map(|name| (name.clone(), stem_path(&state, &id, &name)))
+            .collect(),
+    };
+    if request.remix.is_some() {
+        // A remix of a whole mix would sum the untouched mix back over the
+        // processed one; that is a mistake, not a setting.
+        if source.stem.is_none() {
+            return Err(api_error(
+                StatusCode::BAD_REQUEST,
+                "a remix puts the stems back together, so the processing has to run on one stem".into(),
+            ));
+        }
+        if source.stems.is_empty() {
+            return Err(api_error(StatusCode::BAD_REQUEST, "this track has no stems to put back together".into()));
+        }
+    }
     let media = state.library.media_dir().to_path_buf();
     let reference = match &request.master {
         None => None,
