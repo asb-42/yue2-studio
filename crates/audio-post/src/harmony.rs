@@ -23,22 +23,34 @@
 //! independently sung parts.
 //!
 //! A shift is two textbook steps, not one clever one: resampling moves the
-//! pitch (and the length with it), then a phase vocoder takes the length back
-//! while leaving the pitch alone. Doing the pitch shift by resampling and the
-//! length correction by phase vocoder keeps each step honest — bin remapping
-//! inside a single vocoder pass fights its own phase correction and lands
-//! roughly half an octave out.
+//! pitch (and the length with it), then a time-scaler takes the length back
+//! while leaving the pitch alone. Keeping the two steps apart keeps each
+//! honest — bin remapping inside a single spectral pass fights its own phase
+//! correction and lands roughly half an octave out.
+//!
+//! The time-scaler is **WSOLA**, not a phase vocoder, and the reason is
+//! directional. A shift *up* shortens the track and the length is added back,
+//! which any vocoder manages. A shift *down* leaves the track longer, so the
+//! length has to be taken out — and a phase vocoder cannot compress: its
+//! synthesis hop would drop below a quarter of the window, where the Hann
+//! windows no longer sum flat. Measured on this crate's own vocoder: half the
+//! level and 15% of pitch at a factor of 0.5. Clamping the hop to keep the
+//! level, which is what this did before, is worse in a way you can hear: the
+//! voice then plays in slow motion, so an octave below arrives as a chorus at
+//! half speed and the wrong words under it. WSOLA has no hop to clamp, because
+//! it moves the *join* rather than the phase: it takes the next piece of the
+//! track from further along and crossfades it over the last one, which is a
+//! cut rather than a rate change, and a cut cannot drift.
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use realfft::num_complex::Complex32;
-use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 
 use crate::resample;
 use crate::Stereo;
 
-/// Window and hop for the vocoder: a quarter of the window, so Hann windows
-/// sum to a constant and overlap-add needs no correction beyond the weight.
+/// Window for the time-scaler and its output hop, a quarter of the window:
+/// two pieces overlap by three quarters and the Hann windows cover every
+/// output sample the same number of times.
 const SIZE: usize = 2048;
 const HOP: usize = SIZE / 4;
 
@@ -185,7 +197,7 @@ pub fn shift_channel(x: &[f32], rate: u32, semitones: f32) -> Result<Vec<f32>> {
     // at the original rate that is playing it faster, hence higher. The bound
     // is wide on purpose: a downward shift needs a rate ABOVE the original,
     // and clamping to `rate` would quietly turn a shift down into no shift.
-    let declared = ((rate as f64 / ratio).round() as u32).clamp(1, 384_000);
+    let declared = declared_rate(rate, ratio);
     let pitched = resample::mono(x, rate, declared).context("resample to move the pitch")?;
     // 2. the length back again, pitch untouched.
     // The resample left a track `1 / ratio` as long as it started, so the
@@ -196,13 +208,70 @@ pub fn shift_channel(x: &[f32], rate: u32, semitones: f32) -> Result<Vec<f32>> {
     stretch(&pitched, ratio, x.len())
 }
 
+/// The sample rate to declare for a shift of `ratio`.
+///
+/// The resampler works from two *whole* rates and takes its FFT sizes from
+/// what they have in common, so it is exact when the two share a large factor
+/// and wrong when they share none: at three semitones up, 40363 against 48000
+/// have nothing in common and the result came back at two thirds of the level
+/// with a frequency nowhere near the one asked for. Rounding `rate / ratio` to
+/// an integer is what produced such a pair.
+///
+/// So the rate is chosen as the nearest one that keeps a common factor, which
+/// is the nearest rational `p / q` with `q` a divisor of the original rate: at
+/// `q` the declared rate is exactly `rate / q * p`, and the pair reduces to
+/// `q : p`, both small. The cost is the error of that approximation, and the
+/// search stops at the first divisor good enough to be under a tenth of a
+/// percent — about one and a half cents, well under what an ear separates.
+fn declared_rate(rate: u32, ratio: f64) -> u32 {
+    const GOOD_ENOUGH: f64 = 0.001;
+    let ceiling = 384_000u32;
+    // The declared rate is the original divided by the ratio, so it is `ratio`
+    // inverted that has to be approximated: a shift down declares a *higher*
+    // rate, which is what makes the track longer for the time-scaler to trim.
+    let target = 1.0 / ratio;
+    let mut best = ((rate as f64 * target).round() as u32).clamp(1, ceiling);
+    let mut best_error = f64::INFINITY;
+    for q in 1..=8_192u32 {
+        if rate % q != 0 {
+            continue;
+        }
+        let p = (target * q as f64).round();
+        if p < 1.0 || p > 4.0 * q as f64 {
+            continue;
+        }
+        let declared = (rate / q) as u64 * p as u64;
+        if declared < 1 || declared > ceiling as u64 {
+            continue;
+        }
+        let error = ((p / q as f64) - target).abs() / target;
+        if error < best_error {
+            best_error = error;
+            best = declared as u32;
+            if error <= GOOD_ENOUGH {
+                break;
+            }
+        }
+    }
+    best
+}
+
 /// Time-stretches by `factor` without moving the pitch: above 1 makes the
 /// track longer and slower. Exactly `wanted` frames come back.
 ///
-/// The synthesis hop carries the length change; the phase still advances by
-/// what one *analysis* hop is worth, which is what keeps every partial at its
-/// own frequency. Hop stays a quarter of the window so the Hann windows keep
-/// summing flat and the level survives the overlap-add.
+/// This is WSOLA, waveform-similarity overlap-add, and it is here for one
+/// reason: a pitch shift *down* leaves the track longer than it started, so
+/// the length has to be taken back out, and a phase vocoder cannot compress.
+/// Its synthesis hop would have to fall below a quarter of the window, where
+/// the Hann windows stop summing flat and the reconstruction loses both level
+/// and pitch — measured here as half the level and 15% of pitch. Clamping the
+/// hop instead, as this did before, quietly left every downward shift playing
+/// in slow motion, an octave below sounding like a tape at half speed.
+///
+/// WSOLA compresses by taking the next piece of the track from further along
+/// and crossfading it over the previous one, so each piece keeps the pitch it
+/// came with and the crossfade hides the join. It needs no phase estimate, so
+/// there is nothing in it to drift.
 fn stretch(x: &[f32], factor: f64, wanted: usize) -> Result<Vec<f32>> {
     if x.is_empty() || wanted == 0 {
         return Ok(vec![0.0; wanted]);
@@ -211,112 +280,81 @@ fn stretch(x: &[f32], factor: f64, wanted: usize) -> Result<Vec<f32>> {
         bail!("a stretch factor must be a positive number");
     }
     let factor = factor.clamp(0.25, 4.0);
-    let mut planner = RealFftPlanner::<f32>::new();
     let window: Vec<f32> = (0..SIZE)
         .map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / SIZE as f32).cos())
         .collect();
-    let forward = planner.plan_fft_forward(SIZE);
-    let inverse = planner.plan_fft_inverse(SIZE);
+    // How far the next piece is nominally taken from: a hop in the OUTPUT is
+    // fixed, and the factor divides it to say how far apart the pieces sit in
+    // the input. Below 1 the pieces come from further apart, which is the
+    // compression the pitch shifter needs.
+    let hop_out = HOP;
+    let hop_in = hop_out as f64 / factor;
+    // How far a piece may be slid to find the join that fits best, in samples.
+    let search = (SIZE / 8) as isize;
+    let last = (x.len() as isize - SIZE as isize).max(0);
 
-    let frames = analyse(x, HOP, &window, forward.as_ref());
-    if frames.is_empty() {
-        return Ok(vec![0.0; wanted]);
-    }
-    let bins = frames[0].len();
-    let mut phase = vec![0f64; bins];
-    let mut stretched: Vec<Vec<Complex32>> = Vec::with_capacity(frames.len());
-    let step = std::f64::consts::TAU * HOP as f64 / SIZE as f64;
-    for (index, frame) in frames.iter().enumerate() {
-        let mut out = frame.clone();
-        for bin in 0..bins {
-            let measured = frame[bin].im.atan2(frame[bin].re) as f64;
-            let angle = if index == 0 {
-                measured
-            } else {
-                // advance by the expected step, then correct by the deviation
-                // this frame shows, wrapped into +/- pi
-                phase[bin] += step * bin as f64;
-                phase[bin] += wrap64(measured - phase[bin]);
-                phase[bin]
-            };
-            phase[bin] = angle;
-            out[bin] = Complex32::from_polar(frame[bin].norm(), angle as f32);
-        }
-        stretched.push(out);
-    }
-    // The synthesis hop is what carries the length change. It is held to the
-    // window's quarter or more overlap: below that the Hann windows no longer
-    // sum to a constant, and dividing by the weight then removes level instead
-    // of reconstructing it. A hop between HOP and SIZE/2 covers every factor
-    // from 1 up to 2; beyond that the caller should stretch in steps.
-    let hop_out = ((HOP as f64 * factor).round() as usize).clamp(HOP, SIZE / 2);
-    Ok(synthesise(&stretched, hop_out, wanted, &window, inverse.as_ref()))
-}
-
-/// The difference between two angles, wrapped into +/- pi.
-fn wrap64(angle: f64) -> f64 {
-    let two_pi = std::f64::consts::TAU;
-    (angle + two_pi / 2.0).rem_euclid(two_pi) - two_pi / 2.0
-}
-
-/// Frames of one channel, windowed and transformed, padded so every sample
-/// sits under fully overlapped windows.
-fn analyse(x: &[f32], hop: usize, window: &[f32], forward: &dyn RealToComplex<f32>) -> Vec<Vec<Complex32>> {
-    let padded = x.len() + 2 * SIZE;
-    let count = (padded - SIZE) / hop + 1;
-    let mut frames = Vec::with_capacity(count);
-    let mut input = forward.make_input_vec();
-    for f in 0..count {
-        let start = f * hop;
-        for (i, slot) in input.iter_mut().enumerate() {
-            let p = start + i;
-            let v = if p >= SIZE && p - SIZE < x.len() { x[p - SIZE] } else { 0.0 };
-            *slot = v * window[i];
-        }
-        let mut output = forward.make_output_vec();
-        forward.process(&mut input, &mut output).expect("stft frame");
-        frames.push(output);
-    }
-    frames
-}
-
-/// Overlap-add back to `wanted` frames, dividing by the weight each sample
-/// was covered by.
-fn synthesise(
-    frames: &[Vec<Complex32>],
-    hop: usize,
-    wanted: usize,
-    window: &[f32],
-    inverse: &dyn ComplexToReal<f32>,
-) -> Vec<f32> {
-    let span = frames.len() * hop + SIZE;
+    let frames = wanted / hop_out + 2;
+    let span = frames * hop_out + SIZE;
     let mut out = vec![0.0f32; span];
     let mut weight = vec![0.0f32; span];
-    let mut time = inverse.make_output_vec();
-    let scale = 1.0 / SIZE as f32;
-    for (f, frame) in frames.iter().enumerate() {
-        let mut spectrum = frame.clone();
-        spectrum[0].im = 0.0;
-        if let Some(last) = spectrum.last_mut() {
-            last.im = 0.0;
-        }
-        inverse.process(&mut spectrum, &mut time).expect("istft frame");
-        let start = f * hop;
+    // The part of the last piece the next one will overlap: the next piece is
+    // chosen to continue exactly this, which is what keeps the seams silent.
+    let mut continuation: Vec<f32> = Vec::new();
+
+    for frame in 0..frames {
+        let nominal = ((frame as f64 * hop_in).round() as isize).clamp(0, last);
+        let chosen = if continuation.is_empty() {
+            nominal
+        } else {
+            let mut best = nominal;
+            let mut score = f32::MIN;
+            for candidate in (nominal - search).max(0)..=(nominal + search).min(last) {
+                let start = candidate as usize;
+                let dot: f32 = x[start..start + continuation.len()]
+                    .iter()
+                    .zip(&continuation)
+                    .map(|(a, b)| a * b)
+                    .sum();
+                if dot > score {
+                    score = dot;
+                    best = candidate;
+                }
+            }
+            best
+        };
         for i in 0..SIZE {
-            if start + i < span {
-                out[start + i] += time[i] * scale * window[i];
-                weight[start + i] += window[i] * window[i];
+            let source = chosen as usize + i;
+            let sample = if source < x.len() { x[source] } else { 0.0 };
+            let at = frame * hop_out + i;
+            if at < span {
+                // The window goes on squared, because there is no analysis
+                // window to square it with: WSOLA reads the track straight
+                // through. Weighting once and dividing by the summed square
+                // would divide the level by 2/1.5 and every voice would come
+                // out a third louder than the lead.
+                let w = window[i] * window[i];
+                out[at] += sample * w;
+                weight[at] += w;
             }
         }
+        let end = (chosen as usize + SIZE).min(x.len());
+        if end > chosen as usize + hop_out {
+            continuation.clear();
+            continuation.extend_from_slice(&x[chosen as usize + hop_out..end]);
+        } else {
+            continuation.clear();
+        }
     }
-    // the padding at both ends is dropped, as elsewhere in this crate
+
+    // the first window is a fade-in, so it goes; the weight divides what is left
     let begin = SIZE.min(span);
     let mut result: Vec<f32> = (begin..span.min(begin + wanted))
-        .map(|p| if weight[p] > 1e-8 { out[p] / weight[p] } else { 0.0 })
+        .map(|at| if weight[at] > 1e-8 { out[at] / weight[at] } else { 0.0 })
         .collect();
     result.resize(wanted, 0.0);
-    result
+    Ok(result)
 }
+
 
 /// The lead plus each harmony voice, summed. The lead keeps its own level
 /// unless `lead_gain` says otherwise.
@@ -421,6 +459,59 @@ pub(crate) mod tests {
         assert_eq!(up.len(), x.len());
         let expected = 220.0 * 2f32.powf(7.0 / 12.0);
         assert!((measured_freq(&up, rate) - expected).abs() < 15.0, "measured {}", measured_freq(&up, rate));
+    }
+
+    /// A shifted voice has to sit at the same MOMENT as the lead. A hop
+    /// clamped to a quarter of the window left every downward shift playing in
+    /// slow motion, which an octave below sounds like: a tape at half speed,
+    /// carrying the first half of the track where the second half should be.
+    #[test]
+    fn a_shifted_voice_keeps_the_time_of_the_lead() {
+        let rate = 48_000u32;
+        let second = rate as usize;
+        // one second of a clear pitch, then two seconds of near silence
+        let mut x = vec![0.0f32; second * 3];
+        for (i, slot) in x[..second].iter_mut().enumerate() {
+            *slot = (i as f32 * 2.0 * std::f32::consts::TAU * 220.0 / rate as f32).sin() * 0.2;
+        }
+        for slot in x[second..].iter_mut() {
+            *slot = 1.0 / 32768.0;
+        }
+        let rms = |audio: &[f32], from: usize, to: usize| {
+            let window = &audio[from..to];
+            (window.iter().map(|s| s * s).sum::<f32>() / window.len() as f32).sqrt()
+        };
+        for semitones in [-12.0f32, -7.0, 12.0] {
+            let out = shift_channel(&x, rate, semitones).expect("shift");
+            assert_eq!(out.len(), x.len(), "{semitones} semitones keeps the length");
+            let (lead, silence) = (rms(&out, 0, second), rms(&out, second * 2, second * 3));
+            assert!(lead > 0.05, "{semitones} semitones: the tone must still be there, rms {lead}");
+            assert!(
+                silence < lead / 20.0,
+                "{semitones} semitones: the voice drifted into the silence, rms {silence} against {lead}"
+            );
+        }
+    }
+
+    /// The length has to come back with the level it went out with: the point
+    /// of the resample is that it is the only step that touches the pitch.
+    #[test]
+    fn a_shifted_voice_keeps_the_level_of_the_lead() {
+        let rate = 48_000u32;
+        let x = tone(220.0, 0.8, rate);
+        let lead = (x.iter().map(|s| s * s).sum::<f32>() / x.len() as f32).sqrt();
+        for semitones in [-12.0f32, -9.0, -5.0, -1.0, 3.0, 12.0] {
+            let out = shift_channel(&x, rate, semitones).expect("shift");
+            // only the middle, where the first and last windows do not reach
+            let from = out.len() / 4;
+            let to = out.len() * 3 / 4;
+            let got = (out[from..to].iter().map(|s| s * s).sum::<f32>() / (to - from) as f32).sqrt();
+            assert!(
+                (got / lead - 1.0).abs() < 0.08,
+                "{semitones} semitones changed the level by {}%: {got} against {lead}",
+                100.0 * (got / lead - 1.0)
+            );
+        }
     }
 
     /// A stretch must not move the pitch. Measured across factors, because
@@ -596,6 +687,9 @@ pub(crate) mod tests {
             .apply(&lead).is_err());
     }
 }
+
+
+
 
 
 

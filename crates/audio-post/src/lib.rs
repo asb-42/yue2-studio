@@ -56,11 +56,19 @@ impl Stereo {
     }
 
     /// Scales the whole track down when it would clip.
+    ///
+    /// Scaling by `ceiling / peak` alone does not keep the promise: in `f32`
+    /// the product of the loudest sample can land a hair *above* the ceiling
+    /// after rounding, so each sample is also capped. The guarantee is the
+    /// point of the call — a caller checks `peak()` afterwards.
     pub fn keep_below(&mut self, ceiling: f32) {
         let peak = self.peak();
         if peak > ceiling {
-            let gain = ceiling / peak;
-            self.left.iter_mut().chain(self.right.iter_mut()).for_each(|sample| *sample *= gain);
+            let gain = ceiling as f64 / peak as f64;
+            self.left
+                .iter_mut()
+                .chain(self.right.iter_mut())
+                .for_each(|sample| *sample = ((*sample as f64 * gain) as f32).min(ceiling));
         }
     }
 }
