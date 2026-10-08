@@ -129,6 +129,35 @@ and requires the caption to start with "instrumental" when the track has
 no vocals. The assistant (llama.cpp) polishes the caption into the final
 YuE2 style line.
 
+### The model wants to sing
+
+Worth knowing before you spend GPU time on it: **"instrumental" in the style,
+and `[instrumental]` in the lyrics, are advisory.** They reliably stop *words*
+being sung — and then the model vocalises instead: hums, vowel shapes, an
+"mmm" choir. Measured on 2026-10-10, adding the Instrumental LoRA
+(`yue2-instrumental`, AR 1.0) made no difference: isolated vocal stem rms
+0.103 without it, 0.120 with it. Only the **score** binds — melody on the
+`Ins` line with `Vocal` silent gives a genuinely instrumental render.
+
+So when a track needs intelligible sung lyrics, leave "instrumental" out; when
+it needs no singing, supply a score. See
+[`docs/plans/2026-10-10_choir.md`](2026-10-10_choir.md) §7a.
+
+Also note what the ASR check does and does not prove: `karaoke.instrumental`
+means *no intelligible words*, not *no singing*. A track with a tenor verse and
+a female chorus passes it. Judge by ear or by vocal-stem energy.
+
+### Stems from generated music are not a multitrack
+
+HT-Demucs splits a generated track into six stems, and they are **not** clean
+isolations the way a real multitrack session is: an "other" stem meant to hold
+an organ also carries fragments of the vocalised singing, and the artefacts you
+hear in a stacked stem are usually those bleed-throughs rather than anything
+the processing did. The likely reason is plain: source-separation models are
+trained mostly on finished mixes, not on isolated stems. Treat this as
+principled and currently unavoidable — plan mixes around it rather than
+assuming stem surgery is clean.
+
 ## Environment
 
 | Variable | Default | Meaning |
