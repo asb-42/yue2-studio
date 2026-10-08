@@ -14,7 +14,7 @@ mod audio_facts;
 mod beat_dbn;
 mod listen;
 mod prepare;
-mod audio_pcm;
+pub mod audio_pcm;
 mod legacy_text;
 mod downloads;
 mod engine_runtime;

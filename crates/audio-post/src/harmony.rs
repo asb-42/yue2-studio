@@ -1,10 +1,19 @@
 //! Harmonised voices derived from one lead: the same singing, shifted.
 //!
+//! **Experimental.** It works and is tested, but it has been heard on exactly
+//! one kind of material, and it did not sound good: stacked on a *syllabic*
+//! lead — a verse with a note per syllable — every voice carries its own
+//! smeared consonants on top of each other and the result is mud, not a choir.
+//! Parallel shifting makes musical sense where the source is **sustained and
+//! sparse**: held notes, a drone, an organ chord, a pad. There each copy is one
+//! clean sustained tone, and stacking reads as one thick sound. Pick the
+//! material before reaching for this.
+//!
 //! Every voice is a pitch-shifted copy of the lead, so by construction it
 //! shares the lead's timing sample for sample — which is the one thing a
 //! generated choir can never do for itself (see
 //! `docs/plans/2026-10-05_ensemble.md`). The result is homophonic: the voices
-//! move together, so it sounds like a choir only in the stacked sense, not as
+//! move together, so it sounds like a choir only in the stacked sense, never as
 //! independently sung parts.
 //!
 //! A shift is two textbook steps, not one clever one: resampling moves the
@@ -39,15 +48,33 @@ impl Voice {
     }
 }
 
-/// The usual stack under a soprano lead: alto a fourth below, tenor a sixth
-/// below that, bass an octave under. Sounding together, as a chord.
+/// The usual vocal stack under a soprano lead: alto a fourth below, tenor a
+/// sixth below that, bass an octave under.
+///
+/// **Experimental, and only for sustained material.** Thirds and sixths are a
+/// *vocal* voicing — they need a line that moves by step, so the copies stay
+/// consonant. On a syllabic line they do not: the SATB preset stacked on a
+/// verse read as mud, because every voice smears its own consonants over the
+/// others' (see the module docs).
 pub fn satb() -> Vec<Voice> {
     vec![Voice::new(-5.0, 0.75), Voice::new(-9.0, 0.65), Voice::new(-12.0, 0.85)]
 }
 
-/// A third on top of the lead, the other common doubling.
+/// A third on top of the lead, the other common doubling. Same caveat.
 pub fn thirds_above() -> Vec<Voice> {
     vec![Voice::new(3.0, 0.7), Voice::new(4.0, 0.7)]
+}
+
+/// Octaves and fifths — a mixture registration, the way an organ stacks its
+/// stops (8', 4', 2⅔', 2').
+///
+/// **The preset to reach for.** Unlike thirds and sixths, a fourth and a
+/// twelfth stay consonant with *any* melody, because they are the harmonics of
+/// the fundamental. Stacked on a sustained drone, pad or held organ chord it
+/// reads as one thick sound rather than as copies; on moving material it is
+/// the safest of the three, though still parallel.
+pub fn organ_mixture() -> Vec<Voice> {
+    vec![Voice::new(-12.0, 0.7), Voice::new(-7.0, 0.5), Voice::new(12.0, 0.35)]
 }
 
 /// Shifts one channel by `semitones`, keeping its length.
@@ -424,6 +451,27 @@ pub(crate) mod tests {
             println!("octaves {octaves}: declared {declared}, len {} (want ~{}), measured {measured:.1}, want {want:.1}",
                 y.len(), (x.len() as f32 / ratio) as usize);
             assert!((measured - want).abs() / want < 0.05, "measured {measured}, want {want}");
+        }
+    }
+
+    /// The mixture registration must be octaves and fifths only: those are
+    /// the harmonics of the fundamental, so they cannot turn a chord into a
+    /// dissonance however the lead moves. A fifth *below* is -7, which lands
+    /// on 5 within the octave; both spellings of a fifth are allowed, and
+    /// anything a third or a sixth away is not.
+    #[test]
+    fn the_mixture_stacks_octaves_and_fifths() {
+        let voices = organ_mixture();
+        assert!(!voices.is_empty());
+        for voice in &voices {
+            let within_octave = voice.semitones.abs() % 12.0;
+            let is_octave = within_octave.abs() < 1e-6;
+            let is_fifth = (within_octave - 5.0).abs() < 1e-6 || (within_octave - 7.0).abs() < 1e-6;
+            assert!(
+                is_octave || is_fifth,
+                "{} semitones is neither an octave nor a fifth",
+                voice.semitones
+            );
         }
     }
 

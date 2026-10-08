@@ -1,7 +1,13 @@
 //! Sends one vocal stem through the harmoniser and writes the result as WAV.
 //! Dev-only: an example, so it is never part of the service.
 //!
-//!   cargo run -p audio-post --example harmonise -- in.wav out.wav
+//!   cargo run -p audio-post --example harmonise -- in.wav out.wav [preset]
+//!
+//! Input is 16-bit wav; for an mp3, run the music-server example of the
+//! same name, which decodes with the studio's own decoder.
+//!
+//! Presets: `mixture` (octaves and fifths, the default and the one to reach
+//! for), `satb`, `thirds`.
 
 use audio_post::Stereo;
 
@@ -13,8 +19,17 @@ fn main() -> anyhow::Result<()> {
     let (left, right, rate) = read_wav(&bytes)?;
     println!("read {} frames at {rate} Hz", left.len());
 
+    let preset = args.get(3).cloned().unwrap_or_else(|| "mixture".into());
+    let voices = match preset.as_str() {
+        "satb" => audio_post::harmony::satb(),
+        "thirds" => audio_post::harmony::thirds_above(),
+        "mixture" => audio_post::harmony::organ_mixture(),
+        other => anyhow::bail!("unknown preset {other}: mixture, satb or thirds"),
+    };
+    println!("preset {preset}: {} added voices", voices.len());
+
     let lead = Stereo::new(left, right, rate);
-    let stacked = audio_post::harmony::harmonize(&lead, &audio_post::harmony::satb(), 1.0)?;
+    let stacked = audio_post::harmony::harmonize(&lead, &voices, 1.0)?;
     println!("stacked {} frames (lead had {})", stacked.frames(), lead.frames());
 
     let peak = stacked.left.iter().fold(0f32, |p, s| p.max(s.abs()));
@@ -29,6 +44,8 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn read_wav(bytes: &[u8]) -> anyhow::Result<(Vec<f32>, Vec<f32>, u32)> {
+    // 16-bit PCM wav, straight from the byte layout: no decode needed and no
+    // dependency for the common case.
     let mut pos = 12;
     let mut channels = 2usize;
     let mut rate = 44_100u32;
