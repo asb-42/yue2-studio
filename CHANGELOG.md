@@ -18,6 +18,14 @@ attribution and the full porting notes.
   Windows-only trainer/MIDI/captioner exes refuse cleanly on Linux.
 - `scripts/sync-yue-source.sh`, `scripts/build-yue-runtime.sh`,
   `scripts/run-linux.sh`, `scripts/package-linux.sh`; Linux CI.
+- Measured and documented what YuE2 cannot do: an ensemble of four
+  separately editable voices. Two-voice score dialect, duet-capped
+  assistant, no per-part engine conditioning, and semantic codes that
+  fuse timing with pitch (so there is no shared clock that leaves the
+  melody free). The score parser is deliberately left alone rather than
+  extended to promise voices the engine cannot deliver; findings and the
+  reusable per-part recipe are in
+  [`docs/plans/2026-10-05_ensemble.md`](docs/plans/2026-10-05_ensemble.md).
 - Verified live on ARM64 + GB10/CUDA 13: CUDA song generation, Parakeet
   karaoke, HT-Demucs stems, llama.cpp assistant write.
 - Assistant score edits are validated against the native two-voice dialect
