@@ -147,6 +147,14 @@ Also note what the ASR check does and does not prove: `karaoke.instrumental`
 means *no intelligible words*, not *no singing*. A track with a tenor verse and
 a female chorus passes it. Judge by ear or by vocal-stem energy.
 
+Four slow waltzes (3/4, BED3 recipe: melody on `Ins`, `Vocal` silent) came back
+3-of-4 clean — jazz, country and chanson have silent vocals stems (rms 0.0000,
+0.0003, 0.0011), while the ballroom waltz vocalises around 25–35 s (vocals
+rms 0.0674, blocks at 0.20/0.14). Same recipe, same session: whether it sings
+is per-render luck, not a setting. The dialect spells 3/4 natively (`M:3/4`
+is 24 L-units a bar, `z24` a full-bar rest); a bare "waltz" in the style risks
+Viennese tempo, so name the type and the BPM (84–104 in the measured set).
+
 ### Stems from generated music are not a multitrack
 
 HT-Demucs splits a generated track into six stems, and they are **not** clean
