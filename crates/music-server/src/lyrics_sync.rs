@@ -49,6 +49,12 @@ pub struct LyricsSyncConfig {
     pub whisper_model: Option<String>,
     /// Which OpenRouter speech-to-text model to call.
     pub openrouter_model: Option<String>,
+    /// Let Whisper skip what its speech detector says is not speech. Off by
+    /// default, and that is a decision rather than an oversight: the detector is
+    /// trained on speech, and this studio's other half is singing, which it
+    /// answers with silence. On the other hand it is the honest answer when
+    /// there is nothing to hear.
+    pub whisper_vad: bool,
     /// What the local recogniser runs on. It decides which runtime is
     /// downloaded as much as which one is loaded, so it belongs to the setting
     /// rather than to a guess made at load time.
@@ -79,6 +85,11 @@ pub const WHISPER_SIZES: &[&str] = &["tiny", "base", "small", "medium", "large-v
 const WHISPER_ENGINE_URL: &str =
     "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-ubuntu-arm64.tar.gz";
 const WHISPER_ENGINE_BYTES: u64 = 4_608_377;
+
+/// Silero's detector, as whisper.cpp's built-in voice activity detection wants
+/// it, and the asset that brings it.
+pub const WHISPER_VAD_ASSET: &str = "whisper-vad";
+const VAD_MODEL_FILE: &str = "ggml-silero-v6.2.0.bin";
 
 /// Phrases Whisper writes over music and silence instead of saying it heard
 /// no words: the verbatim hallucinations of the "Bag of Hallucinations"
@@ -130,6 +141,12 @@ pub fn is_hallucination(text: &str) -> bool {
         return true;
     }
     KNOWN.get_or_init(|| HALLUCINATIONS.lines().filter(|line| !line.is_empty()).collect()).contains(plain.as_str())
+}
+
+/// Where whisper.cpp puts the transcript of `wav`: beside it, named after it
+/// with `.json` in place of the extension - so `a.wav` answers at `a.wav.json`.
+fn whisper_json_beside(wav: &Path) -> PathBuf {
+    wav.with_extension("wav.json")
 }
 
 /// The words and their times out of whisper.cpp's JSON.
@@ -260,6 +277,20 @@ pub const ASSETS: &[Asset] = &[
         keep: &["whisper-cli", "libwhisper", "libggml", "libparakeet"],
         vram_gb: None,
         note: "whisper.cpp's own build for this platform: word timestamps, and the --language flag that the Windows faster-whisper bundle cannot honour here.",
+    },
+    Asset {
+        id: "whisper-vad",
+        label: "Silero speech detector (for Whisper)",
+        kind: AssetKind::Model,
+        url: "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin",
+        relative_path: "models/whisper/ggml-silero-v6.2.0.bin",
+        bytes: 885_098,
+        unzip_into: None,
+        marker: "",
+        pick: &[],
+        keep: &[],
+        vram_gb: None,
+        note: "Trained on speech, not on singing: on a choral passage it answers with silence, which is the truer thing to say.",
     },
     Asset {
         id: "whisper-tiny",
@@ -836,6 +867,11 @@ pub struct SyncStatus {
     pub ready: bool,
     pub whisper_binary: Option<String>,
     pub whisper_model: Option<String>,
+    /// Whether the speech detector is asked for before each run.
+    pub whisper_vad: bool,
+    /// And whether it is on disk: a switch that is on without it would run
+    /// without it and say nothing.
+    pub whisper_vad_ready: bool,
     pub openrouter_model: Option<String>,
     /// What the recogniser runs on, so the page that downloads it can show the
     /// same choice that decides which files it fetches.
@@ -897,6 +933,21 @@ impl LyricsSync {
     /// `whisper_model_path` has already checked that every file inside it
     /// arrived. Asking whether that path is a file said no to a complete
     /// installation, which is how a finished download still refused to run.
+    /// Where Silero's speech detector sits, for the times it is asked for.
+    fn whisper_vad_path(&self) -> PathBuf {
+        self.whisper_model_dir().join(VAD_MODEL_FILE)
+    }
+
+    /// The detector is a second download, so switching it on without it is a
+    /// refusal rather than a run that quietly does without it.
+    pub fn whisper_vad_ready(&self) -> bool {
+        ASSETS
+            .iter()
+            .find(|asset| asset.id == WHISPER_VAD_ASSET)
+            .is_some_and(|asset| self.downloader.is_installed(asset))
+            && self.whisper_vad_path().is_file()
+    }
+
     /// A GGML model is one file, so "ready" is that the file is there - not
     /// that a directory is.
     pub fn whisper_model_ready(&self, config: &LyricsSyncConfig) -> bool {
@@ -1017,6 +1068,8 @@ impl LyricsSync {
             ready: config.enabled && ready,
             whisper_binary: whisper_binary.map(|path| path.display().to_string()),
             whisper_model: config.whisper_model.clone(),
+            whisper_vad: config.whisper_vad,
+            whisper_vad_ready: self.whisper_vad_ready(),
             openrouter_model: config.openrouter_model.clone(),
             installed_models: self.installed_models().iter().map(|asset| asset.id.to_string()).collect(),
             // Only what this machine can run: Windows-only runtimes are
@@ -1131,7 +1184,8 @@ impl LyricsSync {
                 if answered[index] {
                     continue;
                 }
-                let Ok(text) = fs::read_to_string(out_dir.join(format!("{index}.json"))) else { continue };
+                let Some(path) = wavs.iter().find(|(slot, _)| *slot == index).map(|(_, wav)| wav) else { continue };
+                let Ok(text) = fs::read_to_string(whisper_json_beside(path)) else { continue };
                 if serde_json::from_str::<serde_json::Value>(&text).is_err() {
                     continue;
                 }
@@ -1141,8 +1195,9 @@ impl LyricsSync {
             }
         };
         let on_card = config.runtime.uses_cuda();
+        let vad = config.whisper_vad && self.whisper_vad_ready();
         let all: Vec<PathBuf> = wavs.iter().map(|(_, wav)| wav.clone()).collect();
-        let mut outcome = self.run_whisper_many(&binary, size, &all, &out_dir, language, on_card, &mut || take(&mut answered), cancel);
+        let mut outcome = self.run_whisper_many(&binary, size, &all, &out_dir, language, on_card, vad, &mut || take(&mut answered), cancel);
         let mut recognised = Recognised::OnDevice;
         if outcome.as_ref().is_err_and(|error| error.to_string() != "cancelled") && on_card {
             // the card refused: the processor takes only what is still unheard,
@@ -1154,7 +1209,7 @@ impl LyricsSync {
                 Ok(())
             } else {
                 recognised = Recognised::OnProcessor;
-                self.run_whisper_many(&binary, size, &left, &out_dir, language, false, &mut || take(&mut answered), cancel)
+                self.run_whisper_many(&binary, size, &left, &out_dir, language, false, vad, &mut || take(&mut answered), cancel)
                     .with_context(|| format!("the card was tried first and refused: {refused}"))
             };
         }
@@ -1199,7 +1254,11 @@ impl LyricsSync {
         fs::create_dir_all(&out_dir).with_context(|| format!("create {}", out_dir.display()))?;
 
         let on_card = config.runtime.uses_cuda();
-        let mut outcome = self.run_whisper(&binary, size, &wav, &out_dir, language, on_card);
+        // Asked for and there: a switch that is on without the detector on disk
+        // would run without it and say nothing, which is the one thing a
+        // switch must not do.
+        let vad = config.whisper_vad && self.whisper_vad_ready();
+        let mut outcome = self.run_whisper(&binary, size, &wav, &out_dir, language, on_card, vad);
         // CTranslate2 fails inside itself on a machine without usable CUDA, so
         // the card is tried and the processor is the answer to its refusal -
         // once, and only in that direction.
@@ -1208,7 +1267,7 @@ impl LyricsSync {
             fs::remove_dir_all(&out_dir).ok();
             fs::create_dir_all(&out_dir).ok();
             outcome = self
-                .run_whisper(&binary, size, &wav, &out_dir, language, false)
+                .run_whisper(&binary, size, &wav, &out_dir, language, false, vad)
                 .with_context(|| format!("the card was tried first and refused: {refused}"));
         }
         fs::remove_file(&wav).ok();
@@ -1217,12 +1276,11 @@ impl LyricsSync {
             fs::remove_dir_all(&out_dir).ok();
             return Err(error);
         }
-        let json = fs::read_dir(&out_dir)
-            .with_context(|| format!("read {}", out_dir.display()))?
-            .flatten()
-            .map(|entry| entry.path())
-            .find(|path| path.extension().and_then(|value| value.to_str()) == Some("json"))
-            .ok_or_else(|| anyhow!("whisper wrote no JSON into {}", out_dir.display()))?;
+        let json = whisper_json_beside(&wav);
+        if !json.is_file() {
+            fs::remove_dir_all(&out_dir).ok();
+            bail!("whisper wrote no JSON beside {}", wav.display());
+        }
         let text = fs::read_to_string(&json).with_context(|| format!("read {}", json.display()))?;
         let words = whisper_words_from_json(&text);
         fs::remove_dir_all(&out_dir).ok();
@@ -1234,8 +1292,8 @@ impl LyricsSync {
 
     /// One run of the recogniser, with its complaints kept: a failure here is
     /// the only place that ever says why nothing was recognised.
-    fn run_whisper(&self, binary: &Path, size: &str, wav: &Path, out_dir: &Path, language: Option<&str>, on_card: bool) -> Result<()> {
-        self.run_whisper_many(binary, size, &[wav.to_path_buf()], out_dir, language, on_card, &mut || {}, &AtomicBool::new(false))
+    fn run_whisper(&self, binary: &Path, size: &str, wav: &Path, out_dir: &Path, language: Option<&str>, on_card: bool, vad: bool) -> Result<()> {
+        self.run_whisper_many(binary, size, &[wav.to_path_buf()], out_dir, language, on_card, vad, &mut || {}, &AtomicBool::new(false))
     }
 
     /// Whisper over every file in one process; `poll` is called while it
@@ -1249,6 +1307,7 @@ impl LyricsSync {
         out_dir: &Path,
         language: Option<&str>,
         on_card: bool,
+        vad: bool,
         poll: &mut dyn FnMut(),
         cancel: &AtomicBool,
     ) -> Result<()> {
@@ -1267,16 +1326,22 @@ impl LyricsSync {
             // empty. `auto` here is whisper.cpp's own request to detect.
             .arg(language.map(str::trim).filter(|code| !code.is_empty()).unwrap_or("auto"))
             .arg("-ojf")
-            // whisper.cpp names its output file, not a folder: one prefix in
-            // the folder, and the JSON is that plus `.json`.
-            .arg("-of")
-            .arg(out_dir.join("whisper"))
+            // No `-of`: whisper.cpp then writes `<input>.json` beside each
+            // input, one per track. Naming one output instead would transcribe
+            // only the first of a batch and drop the rest without a word.
             .arg("-np")
             // Music is not speech, and the tokens Whisper spends on it are the
             // ones that put credit rolls and lyric sheets where nobody sang.
             // Without this a run over a choral passage returns one phrase
             // repeated until the tape runs out.
             .arg("-sns");
+        if vad {
+            // The detector gets its own window over the audio and tells the
+            // decoder which windows hold speech. Without it a run over music
+            // invents words to fill the gaps; with it, a recording that is not
+            // speech comes back empty, which is the true answer.
+            command.arg("--vad").arg("-vm").arg(self.whisper_vad_path());
+        }
         if on_card {
             command.arg("-ng").arg("0");
         }
@@ -1772,6 +1837,40 @@ mod tests {
     /// faster-whisper's `segments` array as if it were the same thing and hand
     /// back an empty transcript without saying so.
     #[test]
+    /// The switch is asked for and the detector is on disk. Anything else - on
+    /// without it, or off - must run without it, because a switch that looks
+    /// like it is doing something and is not is worse than no switch.
+    #[test]
+    fn the_speech_detector_is_only_asked_for_when_it_is_there() {
+        let root = std::env::temp_dir().join(format!("vad-{}", uuid::Uuid::now_v7()));
+        let sync = LyricsSync::new(&root);
+        let config = LyricsSyncConfig {
+            enabled: true,
+            provider: AsrProvider::Whisper,
+            whisper_model: Some("whisper-base".into()),
+            whisper_vad: true,
+            ..Default::default()
+        };
+        assert!(!sync.whisper_vad_ready(), "nothing is downloaded yet");
+        // The detector is a plain file, so readiness is the file being there.
+        fs::create_dir_all(sync.whisper_model_dir()).expect("model folder");
+        fs::write(sync.whisper_vad_path(), b"not really a model").expect("detector");
+        assert!(sync.whisper_vad_ready(), "the detector is on disk");
+        let _ = config;
+        fs::remove_dir_all(&root).ok();
+    }
+
+    /// Where whisper.cpp's transcript lands: beside the file it belongs to,
+    /// named after it. This is the whole reason the batch path reads here - one
+    /// `-of` for several inputs would transcribe only the first.
+    #[test]
+    fn a_transcript_sits_beside_its_audio_and_is_named_after_it() {
+        assert_eq!(
+            whisper_json_beside(Path::new("/tmp/work/3.wav")),
+            Path::new("/tmp/work/3.wav.json")
+        );
+    }
+
     fn the_other_json_shape_reads_as_nothing_rather_than_guessing() {
         assert!(whisper_words_from_json(r#"{"segments": [{"text": "hello", "start": 0.0}]}"#).is_empty());
     }

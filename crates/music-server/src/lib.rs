@@ -3026,7 +3026,9 @@ async fn ensure_local_recogniser(state: &AppState, config: &lyrics_sync::LyricsS
     let ready = |state: &AppState| match config.provider {
         lyrics_sync::AsrProvider::Parakeet => state.lyrics_sync.parakeet_ready(),
         lyrics_sync::AsrProvider::Whisper => {
-            state.lyrics_sync.whisper_binary().is_some() && state.lyrics_sync.whisper_model_ready(config)
+            state.lyrics_sync.whisper_binary().is_some()
+                && state.lyrics_sync.whisper_model_ready(config)
+                && (!config.whisper_vad || state.lyrics_sync.whisper_vad_ready())
         }
         _ => true,
     };
@@ -5115,6 +5117,9 @@ struct KaraokeSettingsRequest {
     provider: Option<lyrics_sync::AsrProvider>,
     whisper_model: Option<Option<String>>,
     openrouter_model: Option<Option<String>>,
+    /// The speech detector, asked for before each run.
+    #[serde(default)]
+    whisper_vad: Option<bool>,
     runtime: Option<lyrics_sync::OnnxFlavour>,
 }
 
@@ -5128,6 +5133,7 @@ async fn update_karaoke_settings(
         if let Some(provider) = request.provider { config.provider = provider; }
         if let Some(model) = request.whisper_model { config.whisper_model = model; }
         if let Some(model) = request.openrouter_model { config.openrouter_model = model; }
+        if let Some(vad) = request.whisper_vad { config.whisper_vad = vad; }
         if let Some(runtime) = request.runtime { config.runtime = runtime; }
         config.clone()
     };
@@ -5200,6 +5206,10 @@ fn karaoke_set(name: &str, device: lyrics_sync::OnnxFlavour, whisper_model: Opti
             // large-v3-turbo would be a quarter of an hour for one song; the
             // dropdown is where a bigger one is asked for.
             wanted.push(whisper_model.unwrap_or("whisper-base").to_string());
+            // Silero's detector comes with the set rather than behind a second
+            // button: it is 885 kB, and a switch that is on but not installed
+            // would quietly do nothing.
+            wanted.push(lyrics_sync::WHISPER_VAD_ASSET.into());
         }
         _ => {}
     }
@@ -8431,6 +8441,7 @@ mod tests {
             // Karaoke is off by default and has to survive a restart the same
             // way the assistant does.
             lyrics_sync: lyrics_sync::LyricsSyncConfig {
+                whisper_vad: false,
                 enabled: true,
                 provider: lyrics_sync::AsrProvider::Parakeet,
                 whisper_model: None,

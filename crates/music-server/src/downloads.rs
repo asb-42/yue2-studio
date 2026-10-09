@@ -728,6 +728,7 @@ mod tests {
             unzip_into: None,
             marker: "",
             pick: &[],
+            keep: &[],
             vram_gb: None,
             note: "",
         }

@@ -24,6 +24,7 @@ export const KaraokeExtras: React.FC<{ engine: string }> = ({ engine }) => {
 
   const [enabled, setEnabled] = useState(false);
   const [openRouterModel, setOpenRouterModel] = useState('');
+  const [vad, setVad] = useState(false);
   const [catalog, setCatalog] = useState<NativeOpenRouterModel[]>([]);
   const [busy, setBusy] = useState<'save' | 'catalog' | null>(null);
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
@@ -43,6 +44,7 @@ export const KaraokeExtras: React.FC<{ engine: string }> = ({ engine }) => {
     seeded.current = true;
     setEnabled(Boolean(status.enabled));
     setOpenRouterModel(status.openrouter_model ?? '');
+    setVad(Boolean(status.whisper_vad));
   }, [status]);
 
   /// The recogniser and the device belong to the control above; sending them
@@ -64,6 +66,12 @@ export const KaraokeExtras: React.FC<{ engine: string }> = ({ engine }) => {
     setEnabled(next);
     setMessage(null);
     await write({ enabled: next }).catch((reason: Error) => setMessage({ tone: 'error', text: reason.message }));
+  };
+
+  const toggleVad = async (next: boolean) => {
+    setVad(next);
+    setMessage(null);
+    await write({ whisper_vad: next }).catch((reason: Error) => setMessage({ tone: 'error', text: reason.message }));
   };
 
   const save = async () => {
@@ -128,6 +136,16 @@ export const KaraokeExtras: React.FC<{ engine: string }> = ({ engine }) => {
             </button>
           </div>
           <p className="text-[11px] leading-4 text-zinc-500">{t('karaokeOpenRouterHint')}</p>
+        </div>
+      )}
+
+      {engine === 'whisper' && (
+        <div className="space-y-1">
+          <label className="flex w-fit cursor-pointer items-center gap-2 rounded-lg px-1 py-0.5 text-xs font-medium text-zinc-700 transition-colors hover:text-pink-600 dark:text-zinc-200 dark:hover:text-pink-400">
+            <input type="checkbox" checked={vad} onChange={(event) => void toggleVad(event.target.checked)} className="h-4 w-4 accent-pink-500" />
+            {t('karaokeVad')}
+          </label>
+          <p className="text-[11px] leading-4 text-zinc-500">{t('karaokeVadHint')}</p>
         </div>
       )}
 
