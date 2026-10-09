@@ -1,4 +1,5 @@
 mod adapters;
+mod align;
 mod processing;
 mod vst;
 mod training;
