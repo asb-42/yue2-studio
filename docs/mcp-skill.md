@@ -86,7 +86,13 @@ connected and the address to paste.
 - **style**: one English sentence in this order - language, genre with its era, vocal
   (register, gender, delivery), instruments named concretely, mood in two to four words,
   production, and last `N BPM`. No artist, song title, key or time signature. An
-  instrumental says `instrumental` where the language goes.
+  instrumental says `instrumental` where the language goes. (The "no artist" is a
+  caption-format convention, not a filter: nothing in the chain blocks or refuses a
+  name, and the style reaches the engine verbatim. One controlled test
+  (`Summer Night Dancing`, same seeds/lyrics/duration, style differing only by
+  "in the style of ABBA") steered the render audibly toward that sound while the
+  control did not — but n=1 and a listener's ear, so treat a name as a hint that
+  sometimes works, never as a guarantee.)
 - **lyrics**: sections tagged `[Intro]`, `[Verse 1]`, `[Pre-Chorus]`, `[Chorus]`,
   `[Bridge]`, `[Outro]`, one tag per line, a blank line between sections, about 2-3 sung
   words per second. Russian `ё` stays `ё`.
