@@ -96,7 +96,10 @@ connected and the address to paste.
   "in the style of Henry Mancini" plus "in the style of Frank Sinatra" lost
   audibly against mood adjectives in the same sentence (dark, nocturnal, deep)
   — the render came out dark and gloomy with a low voice, no crooner, no
-  Mancini trace. Adjectives beat proper nouns.)
+  Mancini trace. Adjectives beat proper nouns. (Follow-up, `Moonlit Waltz`:
+  the other render's brightness came with Bb major where mine had D minor —
+  key choice loads the dice before a word is sung, so a name test needs the
+  key held constant too.)
 - **lyrics**: sections tagged `[Intro]`, `[Verse 1]`, `[Pre-Chorus]`, `[Chorus]`,
   `[Bridge]`, `[Outro]`, one tag per line, a blank line between sections, about 2-3 sung
   words per second. Russian `ё` stays `ё`.
