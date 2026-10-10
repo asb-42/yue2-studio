@@ -92,7 +92,11 @@ connected and the address to paste.
   (`Summer Night Dancing`, same seeds/lyrics/duration, style differing only by
   "in the style of ABBA") steered the render audibly toward that sound while the
   control did not — but n=1 and a listener's ear, so treat a name as a hint that
-  sometimes works, never as a guarantee.)
+  sometimes works, never as a guarantee. Counterpoint (`Waltz in Silver Light`):
+  "in the style of Henry Mancini" plus "in the style of Frank Sinatra" lost
+  audibly against mood adjectives in the same sentence (dark, nocturnal, deep)
+  — the render came out dark and gloomy with a low voice, no crooner, no
+  Mancini trace. Adjectives beat proper nouns.)
 - **lyrics**: sections tagged `[Intro]`, `[Verse 1]`, `[Pre-Chorus]`, `[Chorus]`,
   `[Bridge]`, `[Outro]`, one tag per line, a blank line between sections, about 2-3 sung
   words per second. Russian `ё` stays `ё`.
